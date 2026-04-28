@@ -19,5 +19,11 @@ class GraphClient:
         with self.driver.session() as session:
             result = session.run(query, parameters or {})
             return [record.data() for record in result]
+    
+    def apply_schema(self):
+        from backend.graph.schema import SCHEMA_QUERIES
+        for query in SCHEMA_QUERIES:
+            self.run(query)
+        print("✅ Schema applied successfully")
 
 graph_client = GraphClient()
