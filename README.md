@@ -8,6 +8,7 @@ Most AI agents are stateless — they forget everything after each conversation.
 
 ## Architecture
 
+```
 User → Orchestrator Agent
   ├── Extraction Agent    → pulls facts, entities, episodes
   ├── Retrieval Agent     → finds relevant past memory
@@ -17,6 +18,7 @@ User → Orchestrator Agent
   └── Consolidation Agent → compresses episodes → concepts
               ↓
       Neo4j Knowledge Graph
+```
 
 ## Stack
 - Backend — FastAPI + WebSocket
@@ -27,6 +29,7 @@ User → Orchestrator Agent
 - Deploy — AWS Lambda + Vercel
 
 ## Local Setup
+```bash
 git clone https://github.com/eternal888/Engram
 cd Engram
 python -m venv venv
@@ -34,3 +37,4 @@ venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 uvicorn backend.main:app --reload
+```
