@@ -3,6 +3,7 @@ from backend.core.config import ANTHROPIC_API_KEY
 from backend.agents.extraction_agent import extract_memory
 from backend.graph.memory_writer import write_memory
 from backend.agents.retrieval_agent import retrieve_memories
+from backend.agents.contradiction_agent import detect_contradictions
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -10,7 +11,7 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 def build_context(memories: list) -> str:
     if not memories:
         return "No relevant memories found."
-    
+
     context = "Relevant memories from past conversations:\n\n"
     for i, mem in enumerate(memories, 1):
         context += f"{i}. [{mem['type']}] {mem['text']} (similarity: {mem['similarity']}, confidence: {mem['confidence']})\n"
@@ -26,7 +27,7 @@ def chat(message: str, user_id: str = "default") -> dict:
     response = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=1000,
-        system="""You are a helpful assistant with memory. 
+        system="""You are a helpful assistant with memory.
 You have access to memories from past conversations.
 Always use the provided memories to give personalized, contextual responses.
 If memories are relevant, reference them naturally in your response.""",
@@ -40,12 +41,21 @@ If memories are relevant, reference them naturally in your response.""",
 
     answer = response.content[0].text
 
-    # Step 3 — Extract and store new memory from this conversation turn
+    # Step 3 — Extract new memory
     extraction = extract_memory(message, user_id=user_id)
+
+    # Step 4 — Check for contradictions
+    contradictions = detect_contradictions(
+        extraction["extracted"]["facts"],
+        user_id=user_id
+    )
+
+    # Step 5 — Write new memory
     write_memory(extraction)
 
     return {
         "response": answer,
         "memories_used": memories,
-        "episode_id": extraction["episode_id"]
+        "episode_id": extraction["episode_id"],
+        "contradictions": contradictions
     }
