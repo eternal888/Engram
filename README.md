@@ -26,9 +26,6 @@ User → Orchestrator Agent
 - Frontend — React + Vite + Tailwind
 - Deploy — AWS Lambda + Vercel
 
-## Status
-Active development — Week 2 of 14
-
 ## Local Setup
 git clone https://github.com/eternal888/Engram
 cd Engram
