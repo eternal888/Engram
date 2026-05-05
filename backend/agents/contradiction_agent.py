@@ -87,12 +87,15 @@ def detect_contradictions(new_facts: list, user_id: str) -> list:
                     "confidence": result["confidence"]
                 })
 
-                # Flag losing node in Neo4j
+                # Flag losing node in Neo4j with versioning
                 if result["winner"] == "B":
+                    from backend.graph.versioning import version_node
+                    version_node(existing["id"], change_reason=f"superseded by contradiction: {fact['content'][:50]}")
+                    
                     graph_client.run("""
                         MATCH (c:Concept {id: $id})
                         SET c.status = 'superseded', c.confidence = c.confidence * 0.5
                         """, {"id": existing["id"]})
-                    print(f"⚠️ Contradiction found — existing fact superseded: {existing['content']}")
+                    print(f"⚠️ Contradiction found — existing fact superseded and versioned: {existing['content']}")
 
     return contradictions
