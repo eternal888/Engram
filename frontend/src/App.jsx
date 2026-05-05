@@ -28,10 +28,10 @@ function App() {
         role: 'assistant',
         content: res.data.response,
         memories: res.data.memories_used,
-        contradictions: res.data.contradictions
+        contradictions: res.data.contradictions,
+        grounding: res.data.grounding
       }])
 
-      // Refresh graph after each message
       setGraphRefresh(prev => prev + 1)
     } catch (err) {
       console.error(err)
@@ -44,6 +44,12 @@ function App() {
     }
   }
 
+  const getGroundingColor = (score) => {
+    if (score >= 0.8) return 'text-green-400'
+    if (score >= 0.5) return 'text-yellow-400'
+    return 'text-red-400'
+  }
+
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-7xl mx-auto p-6">
@@ -53,7 +59,6 @@ function App() {
         </header>
 
         <div className="grid grid-cols-2 gap-6">
-          {/* Chat Panel */}
           <div className="space-y-4">
             <div className="space-y-3 mb-4 h-[500px] overflow-y-auto pr-2">
               {messages.length === 0 && (
@@ -68,6 +73,40 @@ function App() {
                     msg.role === 'user' ? 'bg-blue-600' : 'bg-gray-800'
                   }`}>
                     <div className="whitespace-pre-wrap">{msg.content}</div>
+
+                    {msg.grounding && (
+                      <div className="mt-3 pt-3 border-t border-gray-700 text-xs">
+                        <div className="flex justify-between mb-2">
+                          <span className="text-gray-400">Grounding score:</span>
+                          <span className={getGroundingColor(msg.grounding.grounding_score)}>
+                            {(msg.grounding.grounding_score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+
+                        {msg.grounding.citations.length > 0 && (
+                          <div className="mb-2">
+                            <div className="text-gray-400 mb-1">✓ Verified claims:</div>
+                            {msg.grounding.citations.map((c, j) => (
+                              <div key={j} className="text-gray-300 ml-2">
+                                • "{c.claim.substring(0, 80)}..." 
+                                <span className="text-green-500 ml-1">[{(c.trust_score * 100).toFixed(0)}%]</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {msg.grounding.ungrounded_claims.length > 0 && (
+                          <div>
+                            <div className="text-yellow-400 mb-1">⚠ Unverified claims:</div>
+                            {msg.grounding.ungrounded_claims.map((c, j) => (
+                              <div key={j} className="text-gray-400 ml-2">
+                                • "{c.substring(0, 80)}..."
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {msg.memories && msg.memories.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-gray-700 text-xs">
@@ -123,7 +162,6 @@ function App() {
             </div>
           </div>
 
-          {/* Graph Panel */}
           <div>
             <MemoryGraph refreshTrigger={graphRefresh} />
           </div>

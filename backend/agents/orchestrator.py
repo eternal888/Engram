@@ -4,6 +4,7 @@ from backend.agents.extraction_agent import extract_memory
 from backend.graph.memory_writer import write_memory
 from backend.agents.retrieval_agent import retrieve_memories
 from backend.agents.contradiction_agent import detect_contradictions
+from backend.agents.grounding_agent import ground_response
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -41,21 +42,25 @@ If memories are relevant, reference them naturally in your response.""",
 
     answer = response.content[0].text
 
-    # Step 3 — Extract new memory
+    # Step 3 — Ground the response against memories
+    grounding = ground_response(answer, memories)
+
+    # Step 4 — Extract new memory
     extraction = extract_memory(message, user_id=user_id)
 
-    # Step 4 — Check for contradictions
+    # Step 5 — Check for contradictions
     contradictions = detect_contradictions(
         extraction["extracted"]["facts"],
         user_id=user_id
     )
 
-    # Step 5 — Write new memory
+    # Step 6 — Write new memory
     write_memory(extraction)
 
     return {
         "response": answer,
         "memories_used": memories,
         "episode_id": extraction["episode_id"],
-        "contradictions": contradictions
+        "contradictions": contradictions,
+        "grounding": grounding
     }
