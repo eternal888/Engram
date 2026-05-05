@@ -47,3 +47,8 @@ def get_episodes(user_id: str = "default"):
         ORDER BY e.created_at DESC
         """, {"user_id": user_id})
     return {"episodes": episodes}
+
+@router.get("/memory/health")
+def get_health(user_id: str = "default"):
+    from backend.agents.curator_agent import graph_health_report
+    return graph_health_report(user_id)
