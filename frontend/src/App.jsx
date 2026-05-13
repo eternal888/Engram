@@ -44,6 +44,18 @@ function App() {
     }
   }
 
+  const sendFeedback = async (nodeId, feedbackType) => {
+    try {
+      await axios.post(`${API_URL}/memory/feedback`, {
+        node_id: nodeId,
+        feedback: feedbackType
+      })
+      setGraphRefresh(prev => prev + 1)
+    } catch (err) {
+      console.error('Feedback error:', err)
+    }
+  }
+
   const getGroundingColor = (score) => {
     if (score >= 0.8) return 'text-green-400'
     if (score >= 0.5) return 'text-yellow-400'
@@ -112,8 +124,24 @@ function App() {
                       <div className="mt-3 pt-3 border-t border-gray-700 text-xs">
                         <div className="text-gray-400 mb-1">Memories used:</div>
                         {msg.memories.map((m, j) => (
-                          <div key={j} className="text-gray-300">
-                            • [{m.type}] {m.text} <span className="text-gray-500">({(m.similarity * 100).toFixed(0)}%)</span>
+                          <div key={j} className="text-gray-300 flex items-center justify-between py-1">
+                            <span>• [{m.type}] {m.text} <span className="text-gray-500">({(m.similarity * 100).toFixed(0)}%)</span></span>
+                            <div className="flex gap-1 ml-2">
+                              <button
+                                onClick={() => sendFeedback(m.id, 'correct')}
+                                className="px-2 py-0.5 rounded bg-green-900 hover:bg-green-800 text-green-300"
+                                title="Mark correct"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                onClick={() => sendFeedback(m.id, 'incorrect')}
+                                className="px-2 py-0.5 rounded bg-red-900 hover:bg-red-800 text-red-300"
+                                title="Mark incorrect"
+                              >
+                                ✗
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

@@ -1,6 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.core.promotion import promote_memories, decay_confidence, prune_stale
 from backend.agents.curator_agent import run_curator
+from backend.agents.consolidation_agent import run_consolidation
 
 scheduler = BackgroundScheduler()
 
@@ -37,21 +38,23 @@ def run_curator_job():
         print(f"❌ Curator job error: {e}")
 
 
+def run_consolidation_job():
+    print("\n⏰ [Scheduled] Running consolidation...")
+    try:
+        run_consolidation(user_id="default")
+    except Exception as e:
+        print(f"❌ Consolidation job error: {e}")
+
+
 def start_scheduler():
-    # Promotion every 1 hour
     scheduler.add_job(run_promotion_job, 'interval', hours=1, id='promotion')
-
-    # Decay every 6 hours
     scheduler.add_job(run_decay_job, 'interval', hours=6, id='decay')
-
-    # Pruning every 12 hours
     scheduler.add_job(run_pruning_job, 'interval', hours=12, id='pruning')
-
-    # Curator daily
     scheduler.add_job(run_curator_job, 'interval', hours=24, id='curator')
+    scheduler.add_job(run_consolidation_job, 'interval', hours=24, id='consolidation')
 
     scheduler.start()
-    print("✅ Scheduler started — promotion (1h), decay (6h), pruning (12h), curator (24h)")
+    print("✅ Scheduler started — promotion (1h), decay (6h), pruning (12h), curator (24h), consolidation (24h)")
 
 
 def stop_scheduler():
