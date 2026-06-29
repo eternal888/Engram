@@ -87,15 +87,42 @@ def detect_contradictions(new_facts: list, user_id: str) -> list:
                     "confidence": result["confidence"]
                 })
 
-                # Flag losing node in Neo4j with versioning
+                # Flag losing node, create Contradiction node, link both facts
                 if result["winner"] == "B":
                     from backend.graph.versioning import version_node
+                    import uuid
+                    from datetime import datetime
+                    
                     version_node(existing["id"], change_reason=f"superseded by contradiction: {fact['content'][:50]}")
                     
+                    contradiction_id = str(uuid.uuid4())
+                    now = datetime.utcnow().isoformat()
+                    
                     graph_client.run("""
-                        MATCH (c:Concept {id: $id})
-                        SET c.status = 'superseded', c.confidence = c.confidence * 0.5
-                        """, {"id": existing["id"]})
-                    print(f"⚠️ Contradiction found — existing fact superseded and versioned: {existing['content']}")
-
+                        MATCH (loser:Concept {id: $loser_id})
+                        SET loser.status = 'superseded', 
+                            loser.confidence = loser.confidence * 0.5
+                        
+                        CREATE (con:Contradiction {
+                            id: $con_id,
+                            user_id: $user_id,
+                            reasoning: $reasoning,
+                            winner_fact: $winner_text,
+                            loser_fact: $loser_text,
+                            detected_at: $now,
+                            status: 'resolved'
+                        })
+                        
+                        MERGE (con)-[:CONTRADICTS]->(loser)
+                        """, {
+                        "loser_id": existing["id"],
+                        "con_id": contradiction_id,
+                        "user_id": user_id,
+                        "reasoning": result.get("reasoning", "")[:500],
+                        "winner_text": fact["content"][:200],
+                        "loser_text": existing["content"][:200],
+                        "now": now
+                    })
+                    
+                    print(f"⚠️ Contradiction node created — '{existing['content'][:50]}' superseded by '{fact['content'][:50]}'")
     return contradictions
