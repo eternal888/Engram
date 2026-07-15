@@ -1,30 +1,29 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
 from datetime import datetime
 from backend.agents.orchestrator import chat
 from backend.graph.graph_client import graph_client
+from backend.core.auth import get_current_user
 
 router = APIRouter()
 
 
 # ────────────────────────────────────────────────────────────────
-# Request models — user_id is REQUIRED. No silent defaults.
+# Request models — NO user_id from client. It comes from the JWT.
 # ────────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     message: str
-    user_id: str = Field(..., min_length=1, description="Required — identifies the user's memory graph")
 
 
 class FeedbackRequest(BaseModel):
     node_id: str
-    user_id: str = Field(..., min_length=1)
-    feedback: str  # "correct", "incorrect", or "edit"
+    feedback: str  # "correct" | "incorrect" | "edit"
     corrected_value: str = ""
 
 
 # ────────────────────────────────────────────────────────────────
-# Ownership check — every mutation verifies the node belongs to
-# the caller. Prevents cross-user data manipulation.
+# Ownership check — even with valid JWT, verify the target node
+# actually belongs to this user before any mutation.
 # ────────────────────────────────────────────────────────────────
 def _assert_owns(node_id: str, user_id: str):
     result = graph_client.run(
@@ -34,20 +33,23 @@ def _assert_owns(node_id: str, user_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="Node not found")
     if result[0]["owner"] != user_id:
-        # Deliberately vague — don't leak whether node exists for another user
+        # Same message as "not found" — never leak node existence to non-owners
         raise HTTPException(status_code=404, detail="Node not found")
 
 
 # ────────────────────────────────────────────────────────────────
-# Endpoints
+# Endpoints — every one requires a valid JWT via get_current_user
 # ────────────────────────────────────────────────────────────────
 @router.post("/chat")
-def chat_endpoint(request: ChatRequest):
-    return chat(request.message, user_id=request.user_id)
+def chat_endpoint(
+    request: ChatRequest,
+    user_id: str = Depends(get_current_user),
+):
+    return chat(request.message, user_id=user_id)
 
 
 @router.get("/memory/graph")
-def get_graph(user_id: str):
+def get_graph(user_id: str = Depends(get_current_user)):
     nodes = graph_client.run("""
         MATCH (n)
         WHERE n.user_id = $user_id
@@ -67,7 +69,7 @@ def get_graph(user_id: str):
 
 
 @router.get("/memory/episodes")
-def get_episodes(user_id: str):
+def get_episodes(user_id: str = Depends(get_current_user)):
     episodes = graph_client.run("""
         MATCH (e:Episode)
         WHERE e.user_id = $user_id
@@ -79,14 +81,17 @@ def get_episodes(user_id: str):
 
 
 @router.get("/memory/health")
-def get_health(user_id: str):
+def get_health(user_id: str = Depends(get_current_user)):
     from backend.agents.curator_agent import graph_health_report
     return graph_health_report(user_id)
 
 
 @router.post("/memory/feedback")
-def feedback_endpoint(request: FeedbackRequest):
-    _assert_owns(request.node_id, request.user_id)
+def feedback_endpoint(
+    request: FeedbackRequest,
+    user_id: str = Depends(get_current_user),
+):
+    _assert_owns(request.node_id, user_id)
     now = datetime.utcnow().isoformat()
 
     if request.feedback == "correct":
@@ -99,31 +104,28 @@ def feedback_endpoint(request: FeedbackRequest):
                 n.confirmation_count = coalesce(n.confirmation_count, 0) + 1,
                 n.last_accessed = $now
             RETURN n.id as id, n.confidence as confidence
-            """, {"id": request.node_id, "user_id": request.user_id, "now": now})
+            """, {"id": request.node_id, "user_id": user_id, "now": now})
         return {"status": "confirmed", "node_id": request.node_id}
 
     elif request.feedback == "incorrect":
         from backend.graph.versioning import version_node
         version_node(request.node_id, change_reason="user marked incorrect")
-
         graph_client.run("""
             MATCH (n {id: $id, user_id: $user_id})
             SET n.confidence = n.confidence * 0.5,
                 n.status = 'disputed'
             RETURN n.id as id, n.confidence as confidence
-            """, {"id": request.node_id, "user_id": request.user_id})
+            """, {"id": request.node_id, "user_id": user_id})
         return {"status": "disputed", "node_id": request.node_id}
 
     elif request.feedback == "edit" and request.corrected_value:
         from backend.graph.versioning import version_node
         from backend.core.embeddings import embed_text
-
         version_node(
             request.node_id,
             change_reason=f"user edit: {request.corrected_value[:50]}"
         )
         new_embedding = embed_text(request.corrected_value)
-
         graph_client.run("""
             MATCH (n {id: $id, user_id: $user_id})
             SET n.content = $content,
@@ -133,7 +135,7 @@ def feedback_endpoint(request: FeedbackRequest):
             RETURN n.id as id
             """, {
             "id": request.node_id,
-            "user_id": request.user_id,
+            "user_id": user_id,
             "content": request.corrected_value,
             "embedding": new_embedding
         })
