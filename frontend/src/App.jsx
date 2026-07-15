@@ -151,7 +151,7 @@ function HeroGraph({ refreshTrigger }) {
   // pull real graph, seed positions, build adjacency
   const loadGraph = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_URL}/memory/graph`)
+      const res = await axios.get(`${API_URL}/memory/graph?user_id=default`)
       const W = window.innerWidth, H = 520
       const idMap = new Map()
       const nodes = res.data.nodes.map((n, i) => {
