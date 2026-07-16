@@ -13,7 +13,26 @@ const TYPE_COLOR = {
 const FALLBACK = '#6b7280'
 
 /* ──────────────────────────────────────────────────────────────
-   Design tokens + fonts injected once. No Tailwind config needed.
+   Axios instance with auth token auto-injection + 401 logout.
+   ────────────────────────────────────────────────────────────── */
+const api = axios.create({ baseURL: API_URL })
+
+let _onUnauthorized = null
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('engram_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err.response?.status === 401 && _onUnauthorized) _onUnauthorized()
+    return Promise.reject(err)
+  }
+)
+
+/* ──────────────────────────────────────────────────────────────
+   Design tokens + fonts injected once.
    ────────────────────────────────────────────────────────────── */
 function StyleTokens() {
   return (
@@ -134,13 +153,142 @@ function StyleTokens() {
 
       @keyframes egfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
       .eg-fade{animation:egfade .35s ease both}
+
+      .eg-auth-wrap{
+        min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+        position:relative;overflow:hidden;
+      }
+      .eg-auth-card{
+        position:relative;z-index:2;width:100%;max-width:420px;padding:36px 32px;
+      }
+      .eg-auth-title{
+        font-family:var(--sans);font-weight:500;font-size:44px;letter-spacing:-0.03em;
+        margin:8px 0 6px;color:var(--ink);
+      }
+      .eg-auth-sub{
+        font-family:var(--mono);font-size:12px;color:var(--ink-dim);letter-spacing:0.06em;
+        margin-bottom:26px;
+      }
+      .eg-label{
+        font-family:var(--mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;
+        color:var(--ink-faint);display:block;margin:14px 0 6px;
+      }
+      .eg-toggle{
+        text-align:center;margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+      }
+      .eg-toggle button{
+        background:none;border:none;color:var(--episode);cursor:pointer;font-family:var(--mono);
+        font-size:12px;padding:0;margin-left:4px;text-decoration:underline;
+      }
+      .eg-err{
+        margin-top:14px;padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:12px;
+        background:rgba(255,93,108,0.08);border:1px solid rgba(255,93,108,0.28);color:var(--contradiction);
+      }
     `}</style>
   )
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Hero graph — real Neo4j data rendered on a glowing canvas.
-   Mouse attracts/repels, click pulses through neighbors.
+   Auth screen — login + register in one component.
+   ────────────────────────────────────────────────────────────── */
+function AuthScreen({ onAuthed }) {
+  const [mode, setMode] = useState('login')  // 'login' | 'register'
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async () => {
+    setError('')
+    if (!email || !password) { setError('Enter email and password'); return }
+    if (mode === 'register' && password.length < 8) {
+      setError('Password must be at least 8 characters'); return
+    }
+    setLoading(true)
+    try {
+      if (mode === 'register') {
+        const res = await api.post('/auth/register', { email, password })
+        localStorage.setItem('engram_token', res.data.access_token)
+        localStorage.setItem('engram_email', res.data.email)
+        onAuthed(res.data.email)
+      } else {
+        // OAuth2 login uses form-encoded body
+        const body = new URLSearchParams()
+        body.append('username', email)
+        body.append('password', password)
+        const res = await api.post('/auth/login', body, {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        })
+        localStorage.setItem('engram_token', res.data.access_token)
+        localStorage.setItem('engram_email', res.data.email)
+        onAuthed(res.data.email)
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || 'Something went wrong'
+      setError(typeof msg === 'string' ? msg : 'Invalid request')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="eg-auth-wrap">
+      <div className="eg-grid" />
+      <div className="eg-auth-card eg-fade">
+        <span className="eg-eyebrow">
+          <span className="seq">001</span><span className="sep">/</span><span>memory operating system</span>
+        </span>
+        <h1 className="eg-auth-title">Engram</h1>
+        <div className="eg-auth-sub">
+          {mode === 'login' ? 'Log in to your memory graph' : 'Create your memory graph'}
+        </div>
+
+        <label className="eg-label">Email</label>
+        <input
+          className="eg-input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder="you@example.com"
+          disabled={loading}
+        />
+
+        <label className="eg-label">Password</label>
+        <input
+          className="eg-input"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder={mode === 'register' ? 'min. 8 characters' : '••••••••'}
+          disabled={loading}
+        />
+
+        {error && <div className="eg-err">{error}</div>}
+
+        <button
+          className="eg-send"
+          style={{ width: '100%', padding: '13px 0', marginTop: 20 }}
+          onClick={submit}
+          disabled={loading}
+        >
+          {loading ? '...' : mode === 'login' ? 'LOG IN' : 'CREATE ACCOUNT'}
+        </button>
+
+        <div className="eg-toggle">
+          {mode === 'login' ? "No account?" : 'Have an account?'}
+          <button onClick={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login') }}>
+            {mode === 'login' ? 'Create one' : 'Log in'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Hero graph — real Neo4j data via authed axios.
    ────────────────────────────────────────────────────────────── */
 function HeroGraph({ refreshTrigger }) {
   const canvasRef = useRef(null)
@@ -148,10 +296,9 @@ function HeroGraph({ refreshTrigger }) {
   const mouseRef = useRef({ x: -9999, y: -9999, active: false })
   const [counts, setCounts] = useState({ nodes: 0, edges: 0 })
 
-  // pull real graph, seed positions, build adjacency
   const loadGraph = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_URL}/memory/graph?user_id=default`)
+      const res = await api.get(`/memory/graph`)
       const W = window.innerWidth, H = 520
       const idMap = new Map()
       const nodes = res.data.nodes.map((n, i) => {
@@ -184,7 +331,6 @@ function HeroGraph({ refreshTrigger }) {
 
   useEffect(() => { loadGraph() }, [loadGraph, refreshTrigger])
 
-  // animation + interaction loop
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -252,7 +398,6 @@ function HeroGraph({ refreshTrigger }) {
       const m = mouseRef.current
       const cx = W / 2, cy = H / 2
 
-      // physics
       for (const n of nodes) {
         n.vx += (cx - n.x) * 0.0009
         n.vy += (cy - n.y) * 0.0009
@@ -303,7 +448,6 @@ function HeroGraph({ refreshTrigger }) {
       }
       for (const e of edges) e.pulse *= 0.94
 
-      // ambient thinking pulse
       if (t - lastAuto > 2400 + Math.random() * 1800 && nodes.length) {
         lastAuto = t
         const seed = nodes[Math.floor(Math.random() * nodes.length)]
@@ -312,7 +456,6 @@ function HeroGraph({ refreshTrigger }) {
         nb.forEach(({ nbr, edge }, i) => setTimeout(() => { nodes[nbr].pulse = 0.85; edge.pulse = 1 }, 110 + i * 70))
       }
 
-      // draw
       ctx.clearRect(0, 0, W, H)
       for (const e of edges) {
         const a = nodes[e.a], b = nodes[e.b]
@@ -364,7 +507,6 @@ function HeroGraph({ refreshTrigger }) {
       <div className="eg-grid" />
       <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, display: 'block' }} />
 
-      {/* chrome */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex',
         justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', zIndex: 5, pointerEvents: 'none' }}>
         <div className="eg-mono" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-dim)' }}>
@@ -377,7 +519,6 @@ function HeroGraph({ refreshTrigger }) {
         <span className="eg-pill" style={{ pointerEvents: 'auto' }}><span className="dot" /> live · neo4j</span>
       </div>
 
-      {/* centerpiece */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', textAlign: 'center', zIndex: 4, pointerEvents: 'none', padding: '0 24px' }}>
         <span className="eg-eyebrow" style={{ pointerEvents: 'auto' }}>
@@ -390,7 +531,6 @@ function HeroGraph({ refreshTrigger }) {
         </p>
       </div>
 
-      {/* legend + stats */}
       <div className="eg-mono" style={{ position: 'absolute', left: 28, bottom: 22, zIndex: 5,
         display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11, color: 'var(--ink-dim)' }}>
         <span style={{ color: 'var(--ink-faint)', letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 2 }}>Node types</span>
@@ -412,9 +552,9 @@ function HeroGraph({ refreshTrigger }) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Main app — hero on top, real chat below. All logic preserved.
+   Main authenticated app.
    ────────────────────────────────────────────────────────────── */
-function App() {
+function AppInner({ email, onLogout }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -432,7 +572,7 @@ function App() {
     setMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setLoading(true)
     try {
-      const res = await axios.post(`${API_URL}/chat`, { message: userMessage, user_id: 'default' })
+      const res = await api.post(`/chat`, { message: userMessage })
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: res.data.response,
@@ -451,7 +591,7 @@ function App() {
 
   const sendFeedback = async (nodeId, feedbackType) => {
     try {
-      await axios.post(`${API_URL}/memory/feedback`, { node_id: nodeId, feedback: feedbackType })
+      await api.post(`/memory/feedback`, { node_id: nodeId, feedback: feedbackType })
       setGraphRefresh(prev => prev + 1)
     } catch (err) {
       console.error('Feedback error:', err)
@@ -461,145 +601,170 @@ function App() {
   const groundingColor = (s) => s >= 0.8 ? 'var(--concept)' : s >= 0.5 ? '#f5c84e' : 'var(--contradiction)'
 
   return (
+    <div style={{ minHeight: '100vh' }}>
+      <HeroGraph refreshTrigger={graphRefresh} />
+
+      <div style={{ maxWidth: 920, margin: '0 auto', padding: '40px 24px 64px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20, gap: 20, flexWrap: 'wrap' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
+              Talk to Engram
+            </h2>
+            <p className="eg-mono" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--ink-dim)' }}>
+              every turn is stored, grounded, and reconciled in the graph above
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="eg-pill" title={email}>
+              <span className="dot" />
+              {email.length > 24 ? email.slice(0, 22) + '…' : email}
+            </span>
+            <button className="eg-fb no" style={{ padding: '6px 12px' }} onClick={onLogout}>
+              LOG OUT
+            </button>
+          </div>
+        </div>
+
+        <div className="eg-card" style={{ padding: 20 }}>
+          <div ref={scrollRef} style={{ height: 460, overflowY: 'auto', paddingRight: 8, marginBottom: 16 }}>
+            {messages.length === 0 && (
+              <div className="eg-mono" style={{ textAlign: 'center', padding: '120px 20px', color: 'var(--ink-faint)', fontSize: 13 }}>
+                Start a conversation. Engram will remember.
+              </div>
+            )}
+
+            {messages.map((msg, i) => (
+              <div key={i} className="eg-fade" style={{ display: 'flex', marginBottom: 14,
+                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                <div className={msg.role === 'user' ? 'eg-bubble-user' : 'eg-bubble-ai'}
+                  style={{ maxWidth: '86%', borderRadius: 12, padding: '13px 16px', fontSize: 14, lineHeight: 1.5 }}>
+                  <div style={{ whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>{msg.content}</div>
+
+                  {msg.grounding && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
+                          Grounding
+                        </span>
+                        <span className="eg-mono" style={{ color: groundingColor(msg.grounding.grounding_score), fontWeight: 500 }}>
+                          {(msg.grounding.grounding_score * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      {msg.grounding.citations?.length > 0 && (
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ color: 'var(--ink-dim)', marginBottom: 4 }}>✓ Verified</div>
+                          {msg.grounding.citations.map((c, j) => (
+                            <div key={j} style={{ color: 'var(--ink-dim)', marginLeft: 8, marginBottom: 2 }}>
+                              {c.claim.substring(0, 80)}…
+                              <span style={{ color: 'var(--concept)', marginLeft: 6 }} className="eg-mono">
+                                {(c.trust_score * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {msg.grounding.ungrounded_claims?.length > 0 && (
+                        <div>
+                          <div style={{ color: '#f5c84e', marginBottom: 4 }}>⚠ Unverified</div>
+                          {msg.grounding.ungrounded_claims.map((c, j) => (
+                            <div key={j} style={{ color: 'var(--ink-faint)', marginLeft: 8 }}>{c.substring(0, 80)}…</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {msg.memories?.length > 0 && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
+                      <div className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10, marginBottom: 6 }}>
+                        Memories used
+                      </div>
+                      {msg.memories.map((m, j) => (
+                        <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0', gap: 10 }}>
+                          <span style={{ color: 'var(--ink-dim)' }}>
+                            <span className="eg-sw" style={{ color: TYPE_COLOR[m.type] || FALLBACK, background: TYPE_COLOR[m.type] || FALLBACK, marginRight: 7 }} />
+                            {m.text}
+                            <span className="eg-mono" style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
+                              {(m.similarity * 100).toFixed(0)}%
+                            </span>
+                          </span>
+                          <span style={{ display: 'flex', gap: 6 }}>
+                            <button className="eg-fb ok" title="Mark correct" onClick={() => sendFeedback(m.id, 'correct')}>✓</button>
+                            <button className="eg-fb no" title="Mark incorrect" onClick={() => sendFeedback(m.id, 'incorrect')}>✗</button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {msg.contradictions?.length > 0 && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,93,108,0.3)', fontSize: 12 }}>
+                      <div style={{ color: 'var(--contradiction)', marginBottom: 4 }}>⚠ Contradictions detected</div>
+                      {msg.contradictions.map((c, j) => (
+                        <div key={j} style={{ color: 'var(--ink-dim)' }}>
+                          {c.existing_fact} → superseded by → {c.new_fact}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                <div className="eg-bubble-ai eg-mono" style={{ borderRadius: 12, padding: '13px 16px', color: 'var(--ink-dim)', fontSize: 13 }}>
+                  thinking<span style={{ animation: 'egblink 1.2s infinite' }}>…</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              className="eg-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+              placeholder="Tell Engram something…"
+              disabled={loading}
+            />
+            <button className="eg-send" onClick={sendMessage} disabled={loading}>SEND</button>
+          </div>
+        </div>
+
+        <p className="eg-mono" style={{ textAlign: 'center', marginTop: 28, fontSize: 11, color: 'var(--ink-faint)' }}>
+          Engram · multi-agent memory operating system · Ritish Nandikonda · 2026
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Root — auth gate.
+   ────────────────────────────────────────────────────────────── */
+function App() {
+  const [authed, setAuthed] = useState(!!localStorage.getItem('engram_token'))
+  const [email, setEmail] = useState(localStorage.getItem('engram_email') || '')
+
+  const logout = () => {
+    localStorage.removeItem('engram_token')
+    localStorage.removeItem('engram_email')
+    setAuthed(false)
+    setEmail('')
+  }
+
+  useEffect(() => { _onUnauthorized = logout; return () => { _onUnauthorized = null } }, [])
+
+  return (
     <>
       <StyleTokens />
-      <div style={{ minHeight: '100vh' }}>
-        <HeroGraph refreshTrigger={graphRefresh} />
-
-        {/* chat section */}
-        <div style={{ maxWidth: 920, margin: '0 auto', padding: '40px 24px 64px' }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20 }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
-                Talk to Engram
-              </h2>
-              <p className="eg-mono" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--ink-dim)' }}>
-                every turn is stored, grounded, and reconciled in the graph above
-              </p>
-            </div>
-            <span className="eg-pill"><span className="dot" /> session active</span>
-          </div>
-
-          <div className="eg-card" style={{ padding: 20 }}>
-            <div ref={scrollRef} style={{ height: 460, overflowY: 'auto', paddingRight: 8, marginBottom: 16 }}>
-              {messages.length === 0 && (
-                <div className="eg-mono" style={{ textAlign: 'center', padding: '120px 20px', color: 'var(--ink-faint)', fontSize: 13 }}>
-                  Start a conversation. Engram will remember.
-                </div>
-              )}
-
-              {messages.map((msg, i) => (
-                <div key={i} className="eg-fade" style={{ display: 'flex', marginBottom: 14,
-                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                  <div className={msg.role === 'user' ? 'eg-bubble-user' : 'eg-bubble-ai'}
-                    style={{ maxWidth: '86%', borderRadius: 12, padding: '13px 16px', fontSize: 14, lineHeight: 1.5 }}>
-                    <div style={{ whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>{msg.content}</div>
-
-                    {msg.grounding && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <span className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
-                            Grounding
-                          </span>
-                          <span className="eg-mono" style={{ color: groundingColor(msg.grounding.grounding_score), fontWeight: 500 }}>
-                            {(msg.grounding.grounding_score * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        {msg.grounding.citations?.length > 0 && (
-                          <div style={{ marginBottom: 8 }}>
-                            <div style={{ color: 'var(--ink-dim)', marginBottom: 4 }}>✓ Verified</div>
-                            {msg.grounding.citations.map((c, j) => (
-                              <div key={j} style={{ color: 'var(--ink-dim)', marginLeft: 8, marginBottom: 2 }}>
-                                {c.claim.substring(0, 80)}…
-                                <span style={{ color: 'var(--concept)', marginLeft: 6 }} className="eg-mono">
-                                  {(c.trust_score * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {msg.grounding.ungrounded_claims?.length > 0 && (
-                          <div>
-                            <div style={{ color: '#f5c84e', marginBottom: 4 }}>⚠ Unverified</div>
-                            {msg.grounding.ungrounded_claims.map((c, j) => (
-                              <div key={j} style={{ color: 'var(--ink-faint)', marginLeft: 8 }}>{c.substring(0, 80)}…</div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {msg.memories?.length > 0 && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
-                        <div className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10, marginBottom: 6 }}>
-                          Memories used
-                        </div>
-                        {msg.memories.map((m, j) => (
-                          <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0', gap: 10 }}>
-                            <span style={{ color: 'var(--ink-dim)' }}>
-                              <span className="eg-sw" style={{ color: TYPE_COLOR[m.type] || FALLBACK, background: TYPE_COLOR[m.type] || FALLBACK, marginRight: 7 }} />
-                              {m.text}
-                              <span className="eg-mono" style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
-                                {(m.similarity * 100).toFixed(0)}%
-                              </span>
-                            </span>
-                            <span style={{ display: 'flex', gap: 6 }}>
-                              <button className="eg-fb ok" title="Mark correct" onClick={() => sendFeedback(m.id, 'correct')}>✓</button>
-                              <button className="eg-fb no" title="Mark incorrect" onClick={() => sendFeedback(m.id, 'incorrect')}>✗</button>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {msg.contradictions?.length > 0 && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,93,108,0.3)', fontSize: 12 }}>
-                        <div style={{ color: 'var(--contradiction)', marginBottom: 4 }}>⚠ Contradictions detected</div>
-                        {msg.contradictions.map((c, j) => (
-                          <div key={j} style={{ color: 'var(--ink-dim)' }}>
-                            {c.existing_fact} → superseded by → {c.new_fact}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {loading && (
-                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                  <div className="eg-bubble-ai eg-mono" style={{ borderRadius: 12, padding: '13px 16px', color: 'var(--ink-dim)', fontSize: 13 }}>
-                    thinking<span style={{ animation: 'egblink 1.2s infinite' }}>…</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <input
-                className="eg-input"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Tell Engram something…"
-                disabled={loading}
-              />
-              <button className="eg-send" onClick={sendMessage} disabled={loading}>SEND</button>
-            </div>
-          </div>
-
-          <p className="eg-mono" style={{ textAlign: 'center', marginTop: 28, fontSize: 11, color: 'var(--ink-faint)' }}>
-            Engram · multi-agent memory operating system · Ritish Nandikonda · 2026
-          </p>
-        </div>
-      </div>
+      {authed
+        ? <AppInner email={email} onLogout={logout} />
+        : <AuthScreen onAuthed={(e) => { setEmail(e); setAuthed(true) }} />}
     </>
   )
 }
 
 export default App
-
-
-
-
-
