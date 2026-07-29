@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime
-from backend.agents.orchestrator import chat
+from backend.agents.orchestrator import chat, process_memory_background
 from backend.graph.graph_client import graph_client
 from backend.core.auth import get_current_user
 
@@ -43,9 +43,23 @@ def _assert_owns(node_id: str, user_id: str):
 @router.post("/chat")
 def chat_endpoint(
     request: ChatRequest,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user),
 ):
-    return chat(request.message, user_id=user_id)
+    result = chat(request.message, user_id=user_id)
+
+    # Pull the internal field out — the frontend never sees it
+    safe_message = result.pop("_safe_message")
+
+    # Schedule memory processing to run AFTER the response is sent
+    background_tasks.add_task(
+        process_memory_background,
+        safe_message,
+        user_id,
+        result["trace_id"],
+    )
+
+    return result
 
 
 @router.get("/memory/graph")

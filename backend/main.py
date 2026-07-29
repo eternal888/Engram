@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from backend.api.routes import router as memory_router
 from backend.api.auth_routes import router as auth_router
 from backend.api.documents_routes import router as documents_router
+from backend.api.traces_routes import router as traces_router
 from backend.core.scheduler import start_scheduler, stop_scheduler
 
 load_dotenv()
@@ -28,6 +29,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(documents_router, prefix="/api")
+app.include_router(traces_router, prefix="/api")
 app.include_router(memory_router, prefix="/api")
 
 
