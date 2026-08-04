@@ -1,6 +1,7 @@
-import numpy as np
 import anthropic
 import json
+import re
+import spacy
 from datetime import datetime
 from backend.graph.graph_client import graph_client
 from backend.core.embeddings import embed_text
@@ -8,11 +9,13 @@ from backend.core.config import ANTHROPIC_API_KEY
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-
-def cosine_similarity(vec1: list, vec2: list) -> float:
-    a = np.array(vec1)
-    b = np.array(vec2)
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+# Load spaCy's small model once at import (~0.5s, 12MB).
+# Used for fast local entity extraction — avoids a Claude round-trip.
+try:
+    _nlp = spacy.load("en_core_web_sm")
+except Exception as e:
+    print(f"⚠️ spaCy model failed to load, will use Claude for all extraction: {e}")
+    _nlp = None
 
 
 def recency_score(created_at: str) -> float:
@@ -28,51 +31,65 @@ def recency_score(created_at: str) -> float:
 
 
 # ──────────────────────────────────────────────────────────────
-# 1. VECTOR SEARCH — semantic similarity (what you had before)
+# 1. VECTOR SEARCH — Neo4j SEARCH clause with in-index filtering
 # ──────────────────────────────────────────────────────────────
 def vector_search(query: str, user_id: str, top_k: int = 8) -> list:
-    """Find memories whose embeddings are semantically similar to the query."""
+    """
+    Semantic search via Neo4j's HNSW vector index using the SEARCH clause.
+
+    user_id is stored in the index as an additional property, so filtering
+    happens *inside* the index traversal — no over-fetching, and it scales
+    correctly as more users are added.
+    """
     query_embedding = embed_text(query)
 
-    nodes = graph_client.run("""
-        MATCH (n)
-        WHERE n.user_id = $user_id AND n.embedding IS NOT NULL
-        RETURN labels(n)[0] as type, n.id as id,
-               coalesce(n.summary, n.content, n.name, '') as text,
-               n.embedding as embedding,
-               n.confidence as confidence,
-               coalesce(n.confirmation_count, 0) as confirmations,
-               n.created_at as created_at
-        """, {"user_id": user_id})
+    results = graph_client.run("""
+        MATCH (node)
+          SEARCH node IN (
+            VECTOR INDEX memory_embeddings
+            FOR $embedding
+            WHERE node.user_id = $user_id
+            LIMIT $top_k
+          ) SCORE AS score
+        RETURN labels(node)[0] as type,
+               node.id as id,
+               coalesce(node.summary, node.content, node.name, '') as text,
+               node.confidence as confidence,
+               coalesce(node.confirmation_count, 0) as confirmations,
+               node.created_at as created_at,
+               score
+        ORDER BY score DESC
+        """, {
+        "embedding": query_embedding,
+        "user_id": user_id,
+        "top_k": top_k,
+    })
 
-    scored = []
-    for node in nodes:
-        if not node["embedding"]:
-            continue
-        sim = cosine_similarity(query_embedding, node["embedding"])
-        scored.append({
-            "type": node["type"],
-            "id": node["id"],
-            "text": node["text"],
-            "similarity": round(sim, 4),
-            "confidence": node["confidence"] or 0.5,
-            "confirmations": node["confirmations"],
-            "created_at": node["created_at"],
-            "source": "vector",
-        })
-
-    scored.sort(key=lambda x: x["similarity"], reverse=True)
-    return scored[:top_k]
+    return [{
+        "type": r["type"],
+        "id": r["id"],
+        "text": r["text"],
+        "similarity": round(r["score"], 4),
+        "confidence": r["confidence"] or 0.5,
+        "confirmations": r["confirmations"],
+        "created_at": r["created_at"],
+        "source": "vector",
+    } for r in results]
 
 
 # ──────────────────────────────────────────────────────────────
 # 2. GRAPH TRAVERSAL — walk relationships from query entities
 # ──────────────────────────────────────────────────────────────
-def extract_query_entities(query: str) -> list:
-    """Use Claude to pull entity names out of the query."""
+def _extract_entities_with_claude(query: str) -> list:
+    """
+    Fallback path. Slower (~2.5s) but handles vague/implicit references
+    like "that place I mentioned down south".
+    """
+    print("🐢 spaCy found nothing — falling back to Claude for entity extraction")
     prompt = f"""Extract entity names from this query (people, places, things, concepts).
+The query may be vague or reference something implicitly — infer what it likely refers to.
 Return ONLY valid JSON: {{"entities": ["name1", "name2"]}}
-If no entities, return {{"entities": []}}
+If truly nothing can be inferred, return {{"entities": []}}
 
 Query: {query}"""
 
@@ -83,15 +100,68 @@ Query: {query}"""
             messages=[{"role": "user", "content": prompt}]
         )
         raw = response.content[0].text.strip()
+
+        # Strip markdown fences if present
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        parsed = json.loads(raw)
+
+        # Claude sometimes appends prose after the JSON — extract just the
+        # first {...} block rather than parsing the whole response.
+        match = re.search(r'\{.*?\}', raw, re.DOTALL)
+        if not match:
+            print("⚠️ No JSON object found in Claude response")
+            return []
+
+        parsed = json.loads(match.group(0))
         return parsed.get("entities", [])
     except Exception as e:
-        print(f"⚠️ Entity extraction failed: {e}")
+        print(f"⚠️ Claude entity extraction failed: {e}")
         return []
+
+
+def extract_query_entities(query: str) -> list:
+    """
+    Two-tier entity extraction:
+      1. spaCy NER + noun chunks (local, ~5ms) — handles explicit entities
+      2. Claude fallback (~2.5s) — only when spaCy finds nothing,
+         catches vague references like "that thing we discussed"
+
+    Fast path for the common case, full reasoning for the hard case.
+    """
+    if _nlp is not None:
+        doc = _nlp(query)
+
+        # Named entities — proper nouns like "Hyderabad", "Google"
+        useful_labels = {"PERSON", "ORG", "GPE", "LOC", "PRODUCT",
+                         "EVENT", "WORK_OF_ART", "FAC", "NORP"}
+        entities = [
+            ent.text.strip()
+            for ent in doc.ents
+            if ent.label_ in useful_labels and ent.text.strip()
+        ]
+
+        # Noun chunks — catches common nouns like "chess", "data scientist"
+        # that NER misses but which ARE Entity nodes in the graph
+        stopword_roots = {"it", "this", "that", "thing", "something",
+                          "anything", "everything", "i", "you", "we", "they"}
+        noun_chunks = [
+            chunk.text.strip()
+            for chunk in doc.noun_chunks
+            if len(chunk.text.strip()) > 2
+            and chunk.root.pos_ in {"NOUN", "PROPN"}
+            and chunk.root.text.lower() not in stopword_roots
+        ]
+
+        combined = list(dict.fromkeys(entities + noun_chunks))  # dedupe, preserve order
+
+        if combined:
+            print(f"⚡ spaCy entities: {combined}")
+            return combined[:5]
+
+    # Nothing found locally — escalate to Claude
+    return _extract_entities_with_claude(query)
 
 
 def graph_traversal(query: str, user_id: str, depth: int = 2) -> list:
@@ -170,8 +240,7 @@ def hybrid_rank(vector_hits: list, graph_hits: list, top_k: int = 5) -> list:
 
 
 # ──────────────────────────────────────────────────────────────
-# Public entry point — same name + signature as before.
-# Orchestrator keeps working without changes.
+# Public entry point — unchanged signature.
 # ──────────────────────────────────────────────────────────────
 def retrieve_memories(query: str, user_id: str = "default", top_k: int = 5) -> list:
     """Hybrid retrieval: vector + graph traversal, merged and ranked."""
