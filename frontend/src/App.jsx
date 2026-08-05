@@ -12,6 +12,17 @@ const TYPE_COLOR = {
 }
 const FALLBACK = '#6b7280'
 
+// Per-agent colors for the trace bars
+const AGENT_COLOR = {
+  pii_scrubber:        '#4ec9a3',
+  retrieval:           '#5b9bff',
+  response_generation: '#f59e5b',
+  grounding:           '#b87dff',
+  extraction:          '#4ec9a3',
+  contradiction:       '#ff5d6c',
+  memory_writer:       '#8a8a8e',
+}
+
 /* ──────────────────────────────────────────────────────────────
    Axios instance with auth token auto-injection + 401 logout.
    ────────────────────────────────────────────────────────────── */
@@ -32,7 +43,7 @@ api.interceptors.response.use(
 )
 
 /* ──────────────────────────────────────────────────────────────
-   Design tokens + fonts injected once.
+   Design tokens + fonts.
    ────────────────────────────────────────────────────────────── */
 function StyleTokens() {
   return (
@@ -102,17 +113,6 @@ function StyleTokens() {
       }
       .eg-tagline em{color:var(--ink);font-style:normal;font-weight:500}
 
-      .eg-btn{
-        font-family:var(--mono);font-size:12px;letter-spacing:0.04em;
-        padding:11px 18px;border-radius:8px;text-decoration:none;cursor:pointer;
-        display:inline-flex;align-items:center;gap:10px;border:1px solid transparent;
-        transition:transform .15s ease,background .2s,border-color .2s;
-      }
-      .eg-btn.primary{background:var(--ink);color:#0a0a0a;font-weight:500}
-      .eg-btn.primary:hover{transform:translateY(-1px);background:#fff}
-      .eg-btn.ghost{color:var(--ink);border-color:var(--line-strong);background:rgba(20,20,22,0.55)}
-      .eg-btn.ghost:hover{border-color:rgba(255,255,255,0.28);background:rgba(28,28,32,0.65)}
-
       .eg-card{
         background:rgba(13,13,15,0.7);border:1px solid var(--line-strong);
         border-radius:14px;backdrop-filter:blur(8px);
@@ -158,9 +158,7 @@ function StyleTokens() {
         min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
         position:relative;overflow:hidden;
       }
-      .eg-auth-card{
-        position:relative;z-index:2;width:100%;max-width:420px;padding:36px 32px;
-      }
+      .eg-auth-card{position:relative;z-index:2;width:100%;max-width:420px;padding:36px 32px}
       .eg-auth-title{
         font-family:var(--sans);font-weight:500;font-size:44px;letter-spacing:-0.03em;
         margin:8px 0 6px;color:var(--ink);
@@ -173,9 +171,7 @@ function StyleTokens() {
         font-family:var(--mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;
         color:var(--ink-faint);display:block;margin:14px 0 6px;
       }
-      .eg-toggle{
-        text-align:center;margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);
-      }
+      .eg-toggle{text-align:center;margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
       .eg-toggle button{
         background:none;border:none;color:var(--episode);cursor:pointer;font-family:var(--mono);
         font-size:12px;padding:0;margin-left:4px;text-decoration:underline;
@@ -184,15 +180,36 @@ function StyleTokens() {
         margin-top:14px;padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:12px;
         background:rgba(255,93,108,0.08);border:1px solid rgba(255,93,108,0.28);color:var(--contradiction);
       }
+
+      /* ── Trace panel ── */
+      .eg-trace-toggle{
+        width:100%;display:flex;align-items:center;justify-content:space-between;
+        background:none;border:none;cursor:pointer;padding:14px 4px;
+        font-family:var(--mono);font-size:11px;letter-spacing:0.16em;text-transform:uppercase;
+        color:var(--ink-faint);transition:color .2s;
+      }
+      .eg-trace-toggle:hover{color:var(--ink-dim)}
+      .eg-trace-row{
+        display:flex;align-items:center;gap:14px;padding:9px 12px;cursor:pointer;
+        border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+        transition:background .15s;
+      }
+      .eg-trace-row:hover{background:rgba(255,255,255,0.03)}
+      .eg-trace-caret{color:var(--ink-faint);width:10px;flex-shrink:0}
+      .eg-trace-detail{padding:6px 12px 14px 34px;display:flex;flex-direction:column;gap:5px}
+      .eg-trace-agent{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px}
+      .eg-trace-agent .name{color:var(--ink-dim);width:150px;flex-shrink:0}
+      .eg-trace-bar{height:5px;border-radius:3px;min-width:2px;transition:width .3s ease}
+      .eg-trace-ms{color:var(--ink-faint);flex-shrink:0;font-size:10px}
     `}</style>
   )
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Auth screen — login + register in one component.
+   Auth screen.
    ────────────────────────────────────────────────────────────── */
 function AuthScreen({ onAuthed }) {
-  const [mode, setMode] = useState('login')  // 'login' | 'register'
+  const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -212,7 +229,6 @@ function AuthScreen({ onAuthed }) {
         localStorage.setItem('engram_email', res.data.email)
         onAuthed(res.data.email)
       } else {
-        // OAuth2 login uses form-encoded body
         const body = new URLSearchParams()
         body.append('username', email)
         body.append('password', password)
@@ -244,35 +260,22 @@ function AuthScreen({ onAuthed }) {
         </div>
 
         <label className="eg-label">Email</label>
-        <input
-          className="eg-input"
-          type="email"
-          value={email}
+        <input className="eg-input" type="email" value={email}
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder="you@example.com"
-          disabled={loading}
-        />
+          placeholder="you@example.com" disabled={loading} />
 
         <label className="eg-label">Password</label>
-        <input
-          className="eg-input"
-          type="password"
-          value={password}
+        <input className="eg-input" type="password" value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder={mode === 'register' ? 'min. 8 characters' : '••••••••'}
-          disabled={loading}
-        />
+          disabled={loading} />
 
         {error && <div className="eg-err">{error}</div>}
 
-        <button
-          className="eg-send"
-          style={{ width: '100%', padding: '13px 0', marginTop: 20 }}
-          onClick={submit}
-          disabled={loading}
-        >
+        <button className="eg-send" style={{ width: '100%', padding: '13px 0', marginTop: 20 }}
+          onClick={submit} disabled={loading}>
           {loading ? '...' : mode === 'login' ? 'LOG IN' : 'CREATE ACCOUNT'}
         </button>
 
@@ -288,7 +291,145 @@ function AuthScreen({ onAuthed }) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Hero graph — real Neo4j data via authed axios.
+   Trace panel — collapsed by default, expands to show agent runs.
+   ────────────────────────────────────────────────────────────── */
+function TracePanel({ refreshTrigger }) {
+  const [open, setOpen] = useState(false)
+  const [traces, setTraces] = useState([])
+  const [expandedId, setExpandedId] = useState(null)
+  const [details, setDetails] = useState({})   // trace_id -> events[]
+  const [loading, setLoading] = useState(false)
+
+  const loadTraces = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api.get('/traces?limit=10')
+      setTraces(res.data.traces || [])
+    } catch (err) {
+      console.error('Failed to load traces:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // Refresh when opened, and after each new chat turn (if open)
+  useEffect(() => { if (open) loadTraces() }, [open, refreshTrigger, loadTraces])
+
+  const toggleDetail = async (traceId) => {
+    if (expandedId === traceId) { setExpandedId(null); return }
+    setExpandedId(traceId)
+    if (details[traceId]) return          // already fetched, don't refetch
+    try {
+      const res = await api.get(`/traces/${traceId}`)
+      setDetails(prev => ({ ...prev, [traceId]: res.data.events || [] }))
+    } catch (err) {
+      console.error('Failed to load trace detail:', err)
+    }
+  }
+
+  const timeAgo = (iso) => {
+    if (!iso) return ''
+    const secs = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000)
+    if (secs < 60) return `${secs}s ago`
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
+    return `${Math.floor(secs / 86400)}d ago`
+  }
+
+  const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`)
+
+  const latest = traces[0]
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <button className="eg-trace-toggle" onClick={() => setOpen(!open)}>
+        <span>{open ? '▾' : '▸'}  Agent traces</span>
+        <span style={{ color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>
+          {latest ? `${fmtMs(latest.total_latency_ms)} last turn · ${latest.agent_count} agents` : ''}
+        </span>
+      </button>
+
+      {open && (
+        <div className="eg-card eg-fade" style={{ padding: 8 }}>
+          {loading && traces.length === 0 && (
+            <div className="eg-mono" style={{ padding: 20, textAlign: 'center',
+              color: 'var(--ink-faint)', fontSize: 12 }}>loading…</div>
+          )}
+
+          {!loading && traces.length === 0 && (
+            <div className="eg-mono" style={{ padding: 20, textAlign: 'center',
+              color: 'var(--ink-faint)', fontSize: 12 }}>
+              No traces yet. Send a message to generate one.
+            </div>
+          )}
+
+          {traces.map((t) => {
+            const events = details[t.trace_id] || []
+            const maxMs = Math.max(...events.map(e => e.latency_ms || 0), 1)
+            const isOpen = expandedId === t.trace_id
+
+            return (
+              <div key={t.trace_id}>
+                <div className="eg-trace-row" onClick={() => toggleDetail(t.trace_id)}>
+                  <span className="eg-trace-caret">{isOpen ? '▾' : '▸'}</span>
+                  <span style={{ width: 70, color: 'var(--ink-faint)' }}>{timeAgo(t.started_at)}</span>
+                  <span style={{ width: 60, color: 'var(--ink)' }}>{fmtMs(t.total_latency_ms)}</span>
+                  <span style={{ width: 100 }}>
+                    {(t.total_tokens_input + t.total_tokens_output).toLocaleString()} tok
+                  </span>
+                  <span style={{ width: 80 }}>{t.agent_count} agents</span>
+                  {t.error_count > 0 && (
+                    <span style={{ color: 'var(--contradiction)' }}>{t.error_count} errors</span>
+                  )}
+                </div>
+
+                {isOpen && (
+                  <div className="eg-trace-detail eg-fade">
+                    {events.length === 0 && (
+                      <span className="eg-mono" style={{ color: 'var(--ink-faint)', fontSize: 11 }}>
+                        loading…
+                      </span>
+                    )}
+                    {events.map((e, i) => (
+                      <div key={i} className="eg-trace-agent">
+                        <span className="name">{e.agent_name}</span>
+                        <span
+                          className="eg-trace-bar"
+                          style={{
+                            width: `${Math.max(2, ((e.latency_ms || 0) / maxMs) * 100)}%`,
+                            maxWidth: 340,
+                            background: e.status === 'error'
+                              ? 'var(--contradiction)'
+                              : (AGENT_COLOR[e.agent_name] || FALLBACK),
+                            boxShadow: `0 0 8px ${AGENT_COLOR[e.agent_name] || FALLBACK}44`,
+                          }}
+                        />
+                        <span className="eg-trace-ms">{fmtMs(e.latency_ms || 0)}</span>
+                        {(e.tokens_input > 0 || e.tokens_output > 0) && (
+                          <span className="eg-trace-ms">
+                            · {(e.tokens_input + e.tokens_output).toLocaleString()} tok
+                          </span>
+                        )}
+                        {e.status === 'error' && (
+                          <span className="eg-trace-ms" style={{ color: 'var(--contradiction)' }}>
+                            · error
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Hero graph.
    ────────────────────────────────────────────────────────────── */
 function HeroGraph({ refreshTrigger }) {
   const canvasRef = useRef(null)
@@ -732,6 +873,8 @@ function AppInner({ email, onLogout }) {
             <button className="eg-send" onClick={sendMessage} disabled={loading}>SEND</button>
           </div>
         </div>
+
+        <TracePanel refreshTrigger={graphRefresh} />
 
         <p className="eg-mono" style={{ textAlign: 'center', marginTop: 28, fontSize: 11, color: 'var(--ink-faint)' }}>
           Engram · multi-agent memory operating system · Ritish Nandikonda · 2026
