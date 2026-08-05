@@ -166,7 +166,7 @@ Index returns 8 best overall: 5 Alice's, 2 Bob's, 1 yours.
 Filter by user → you get 1 result.
 ```
 
-Which is why the first version needed `fetch_k = top_k * 4` — over-fetch and hope. With
+Which is why the first version needed `fetch_k = top_k * 4` — over-fetch and filter. With
 `user_id` in the index, filtering happens *during* traversal. Ask for 8, get 8, all yours.
 
 ---
@@ -210,7 +210,7 @@ grounding              5.4s   ← Claude
 
 **The two Claude calls are ~82% of the wait.**
 
-### Streaming (the big one)
+### Streaming
 
 Right now the user stares at "thinking…" for 5.5 seconds, then the full answer appears at
 once. With SSE streaming, tokens arrive as Claude generates them — text starts appearing
@@ -251,7 +251,8 @@ RETURN t.latency_ms, t.created_at ORDER BY t.created_at DESC LIMIT 5
 ```
 
 **3. Perceived latency ≠ total work.** Background processing didn't make anything faster.
-It moved work to where nobody's waiting. Streaming will do the same, more dramatically.
+It moved work to where no one is waiting on it. Streaming applies the same principle to a
+larger portion of the request.
 
 **4. Complexity class matters more than constant factors.** The vector index was worth
 doing not for 2.8s → 0.3s, but for O(n) → O(log n). One is a nice improvement; the other

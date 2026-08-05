@@ -261,7 +261,8 @@ Engram/
 │   ├── ingestion/        fetchers, chunker, pipeline
 │   └── main.py
 ├── frontend/
-│   └── src/App.jsx       hero graph, chat, trace panel, auth — single file
+│   └── src/App.jsx       memory graph visualization, chat interface,
+│                         provenance display, trace panel, authentication
 ├── docs/
 ├── tests/
 ├── .env                  never committed

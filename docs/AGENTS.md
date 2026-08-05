@@ -13,7 +13,7 @@ themselves. That was a deliberate choice (see DECISIONS.md).
 **File:** `backend/agents/orchestrator.py`
 **Runs:** every chat turn
 
-The conductor. Owns the pipeline order and — importantly — the split between what the
+Owns the pipeline order and — importantly — the split between what the
 user waits for and what happens after.
 
 **Fast path** (user is waiting):
@@ -27,7 +27,7 @@ extraction → contradiction → memory_writer
 ```
 
 **Why the split:** steps 5–7 produce no output the user sees in that turn. Making them
-wait ~2 seconds for memory writing serves nobody. `process_memory_background()` is
+wait ~2 seconds for memory writing adds latency without benefit. `process_memory_background()` is
 scheduled via FastAPI's `BackgroundTasks` from the route.
 
 **Returns:**
@@ -150,8 +150,8 @@ memory, that's stronger evidence than either alone.
 
 **Why hybrid at all:** vector search finds semantically similar text. Graph traversal
 finds structurally connected memories that may share no vocabulary with the query. Neither
-subsumes the other. This is also the honest answer to *"why a graph database instead of
-just a vector store?"*
+subsumes the other. This is also the answer to *"why a graph database instead of just a
+vector store?"*
 
 ---
 
@@ -182,8 +182,7 @@ per response with a color: green ≥ 0.8, amber ≥ 0.5, red below.
 **Why an LLM and not embedding similarity:** similarity can't handle negation. "User does
 NOT like coffee" and "User likes coffee" have ~0.95 cosine similarity — nearly identical
 wording, opposite meaning. Same problem with entity swaps (Google vs Microsoft), numbers
-(5km vs 50km), and tense. Claude reasons about entailment. That's the whole point of the
-feature.
+(5km vs 50km), and tense. Claude reasons about entailment, which is what the feature requires.
 
 ---
 
@@ -219,7 +218,7 @@ at a time."*
 **File:** `backend/agents/curator_agent.py`
 **Runs:** scheduled, every 24h
 
-Background graph maintenance. Nobody triggers it; it just keeps the graph clean.
+Scheduled graph maintenance. Runs unattended.
 
 **Duplicate merging** — finds `Concept` pairs above 0.92 cosine similarity, asks Claude
 to confirm they're truly duplicates, then merges: keeps the higher-confidence node,
@@ -254,8 +253,8 @@ distinctions.
 **File:** `backend/agents/consolidation_agent.py`
 **Runs:** scheduled, every 24h
 
-The "sleep cycle." Compresses many episodes into fewer, higher-level concepts — the way
-human memory consolidates during sleep.
+Compresses many episodes into fewer, higher-level concepts — modeled on the way human
+memory consolidates during sleep.
 
 **How it works:**
 1. Read up to 20 episodes where `consolidated = false`

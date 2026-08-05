@@ -160,7 +160,8 @@ f = open("data.txt")
 f.close()
 ```
 
-If the middle line throws, `close()` never runs. The file leaks. The fix is ugly:
+If the middle line throws, `close()` never runs and the file handle leaks. The manual fix
+is verbose:
 
 ```python
 f = open("data.txt")
@@ -412,7 +413,7 @@ while start < len(words):
 ```
 
 **Why 300 words:** embeddings work best on focused semantic units. Too small and there's
-no context; too large and the embedding averages multiple topics into mush.
+no context; too large and the embedding averages multiple topics, losing specificity.
 
 **Why 50 words of overlap:** without it, a sentence crossing a boundary gets split and
 neither chunk carries the full idea:
@@ -494,7 +495,7 @@ Without them Cypher reads `vector.dimensions` as "the `dimensions` property of `
 
 ---
 
-## Debugging lessons
+## Debugging notes
 
 **The editor can lie.** During one session VS Code showed a saved file while the file on
 disk still had the old content. Symptom: "I saved it" and "it doesn't work" both true.
@@ -518,7 +519,7 @@ old slow calls. Query individual recent records instead.
 
 ---
 
-## Failures worth remembering
+## Environment issues and fixes
 
 | Symptom | Cause | Fix |
 |---|---|---|

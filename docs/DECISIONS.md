@@ -38,7 +38,7 @@ Acceptable at this scale.
 you answer "where does the user work, geographically?" A flat store would need both facts
 to be semantically similar to the query, which they aren't.
 
-This is also the honest answer to *"why not just use a vector database?"* — because you'd
+This is also the answer to *"why not just use a vector database?"* — because you'd
 lose graph traversal, and graph traversal finds memories vector search misses.
 
 ---
@@ -60,7 +60,7 @@ Python-side merging.
 | Round-trips | four | one |
 | Maintenance | four indexes to rebuild if the embedding model changes | one |
 
-The merging problem is the real killer. With four indexes each returning 8 results, you
+The merging problem is the deciding factor. With four indexes each returning 8 results, you
 get 32 rows and re-rank them yourself — which is exactly the Python-side work the index
 was supposed to eliminate.
 
@@ -106,8 +106,8 @@ can't know in advance which strategy will surface the right memory.
 Trust the ranker, not the router. Same principle as letting a database plan its own
 queries instead of asking the user.
 
-**This is a case where the simpler implementation is also the better one** — worth saying
-out loud, because the original plan specified the tool-using version.
+**The simpler implementation is also the better one here**, which is worth noting because
+the original plan specified the tool-using version.
 
 ---
 
@@ -188,7 +188,7 @@ writing in the background via FastAPI `BackgroundTasks`.
 **Rejected:** run all seven agents before responding.
 
 **Why:** steps 5–7 produce nothing the user sees in that turn. Making them wait ~2s for
-memory writing is pure loss.
+memory writing is wasted latency.
 
 **Trade-off, and it's real:** contradictions no longer appear in the response for the turn
 that caused them. They're detected and stored seconds later, but the UI's red
@@ -304,7 +304,8 @@ alone.
 ### 300-word chunks, 50-word overlap
 
 **Why 300:** embeddings work best on focused semantic units. Too small and each chunk
-lacks context; too large and the embedding averages across multiple topics into mush.
+lacks context; too large and the embedding averages across multiple topics, losing
+specificity.
 200–500 words is the usual sweet spot.
 
 **Why overlap:** without it, a sentence spanning a boundary is split across two chunks and
@@ -385,9 +386,9 @@ finally:
         print(f"⚠️ Trace write failed: {write_err}")
 ```
 
-**Why:** if Neo4j hiccups, the user's chat already succeeded. Returning a 500 because
-logging failed would be absurd. Observability is a secondary concern and must behave like
-one.
+**Why:** if Neo4j is briefly unavailable, the user's chat already succeeded. Returning a 500 because
+logging failed would be incorrect behavior. Observability is a secondary concern and must
+be treated as one.
 
 Note the contrast with the *outer* try/except, which re-raises. Agent failures propagate;
 trace-write failures don't.

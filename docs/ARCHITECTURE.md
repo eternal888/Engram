@@ -23,7 +23,7 @@ properties ordinary chatbots lack:
                           │   React frontend     │
                           │   (Vite + Tailwind)  │
                           │                      │
-                          │  · hero memory graph │
+                          │  · memory graph      │
                           │  · chat + provenance │
                           │  · trace panel       │
                           │  · login / register  │
@@ -133,7 +133,7 @@ This is the core loop. Understanding it means understanding Engram.
 | `grounding_agent.py` | Verifies response claims against memories, assigns trust scores |
 | `contradiction_agent.py` | Detects conflicting facts, resolves them, writes audit nodes |
 | `curator_agent.py` | Background: merges duplicates, finds orphans, reports graph health |
-| `consolidation_agent.py` | Background "sleep cycle": compresses episodes into concepts |
+| `consolidation_agent.py` | Scheduled: compresses recurring themes across episodes into concepts |
 
 ### `backend/graph/`
 
