@@ -200,37 +200,6 @@ $env:PYTHONPATH = "D:\Projects\Engram"
 
 AuraDB Free auto-pauses after ~3 days idle. Go to console.neo4j.io and click **Resume**.
 
-### Frontend shows 0 nodes / 422 errors
-
-Usually stale JavaScript, or a save that didn't reach disk. Check the file on disk, not in
-the editor:
-
-```powershell
-Get-Content D:\Projects\Engram\frontend\src\App.jsx | Select-String "memory/graph"
-```
-
-If it disagrees with what your editor shows, edit through PowerShell:
-
-```powershell
-$path = "D:\Projects\Engram\frontend\src\App.jsx"
-(Get-Content $path -Raw).Replace('old text', 'new text') | Set-Content $path -NoNewline
-```
-
-Then hard-reload the browser (DevTools open → right-click refresh → "Empty Cache and Hard
-Reload").
-
-### git: `Author identity unknown`
-
-```powershell
-git config --global user.name "yourname"
-git config --global user.email "you@example.com"
-```
-
-### VS Code terminal doesn't see a newly installed tool
-
-VS Code caches its environment. Kill every `Code` process in Task Manager and reopen, or
-just use a regular PowerShell window.
-
 ---
 
 ## Backups
