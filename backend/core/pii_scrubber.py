@@ -2,16 +2,26 @@
 PII Scrubber — detects and redacts sensitive info before it hits Neo4j.
 Uses Microsoft Presidio + spaCy for detection.
 
-Design principle: PII never touches the database. Scrubbing happens at the
-ingress point (Orchestrator → Extraction), so all downstream storage,
-embeddings, and logs are already sanitized.
+Two entity sets, because the read and write paths have different needs:
+
+  DEFAULT_ENTITIES — used on the WRITE path (memory extraction, document
+      ingestion). Includes PERSON and LOCATION, so no names or places are
+      ever persisted.
+
+  QUERY_ENTITIES — used on the READ path (incoming chat messages). Excludes
+      PERSON and LOCATION, because those are search terms in a question, not
+      data being stored. Redacting them turns "what did I say about Hyderabad"
+      into "what did I say about [LOCATION]", which matches nothing.
+
+Genuinely sensitive identifiers — emails, phones, cards, SSNs — are scrubbed
+on both paths.
 """
 
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
-# What we scrub. Extendable.
+# Write path — everything, including names and places.
 DEFAULT_ENTITIES = [
     "EMAIL_ADDRESS",
     "PHONE_NUMBER",
@@ -26,6 +36,20 @@ DEFAULT_ENTITIES = [
     "LOCATION",
 ]
 
+# Read path — sensitive identifiers only. Names and locations survive so
+# retrieval can still match on them.
+QUERY_ENTITIES = [
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "CREDIT_CARD",
+    "US_SSN",
+    "IP_ADDRESS",
+    "IBAN_CODE",
+    "US_BANK_NUMBER",
+    "US_PASSPORT",
+    "US_DRIVER_LICENSE",
+]
+
 # One-time init — spaCy load is expensive
 _analyzer = AnalyzerEngine()
 _anonymizer = AnonymizerEngine()
@@ -34,6 +58,11 @@ _anonymizer = AnonymizerEngine()
 def scrub(text: str, entities: list = None) -> dict:
     """
     Detect and redact PII in text.
+
+    Args:
+        text: raw input
+        entities: which entity types to scrub. Defaults to DEFAULT_ENTITIES
+                  (the write path). Pass QUERY_ENTITIES for incoming queries.
 
     Returns:
         {

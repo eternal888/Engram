@@ -17,6 +17,15 @@ except Exception as e:
     print(f"⚠️ spaCy model failed to load, will use Claude for all extraction: {e}")
     _nlp = None
 
+# PII placeholders are redaction markers, not real entities. If they reach
+# graph traversal they match nearly every scrubbed node in the database.
+PII_PLACEHOLDERS = {
+    "person", "email_address", "phone_number", "location",
+    "credit_card", "us_ssn", "ip_address", "iban_code",
+    "us_bank_number", "us_passport", "us_driver_license",
+    "date_time", "nrp", "url",
+}
+
 
 def recency_score(created_at: str) -> float:
     """1.0 = brand new, fades to 0 over ~30 days."""
@@ -38,7 +47,7 @@ def vector_search(query: str, user_id: str, top_k: int = 8) -> list:
     Semantic search via Neo4j's HNSW vector index using the SEARCH clause.
 
     user_id is stored in the index as an additional property, so filtering
-    happens *inside* the index traversal — no over-fetching, and it scales
+    happens inside the index traversal — no over-fetching, and it scales
     correctly as more users are added.
     """
     query_embedding = embed_text(query)
@@ -82,7 +91,7 @@ def vector_search(query: str, user_id: str, top_k: int = 8) -> list:
 # ──────────────────────────────────────────────────────────────
 def _extract_entities_with_claude(query: str) -> list:
     """
-    Fallback path. Slower (~2.5s) but handles vague/implicit references
+    Fallback path. Slower (~2.5s) but handles vague or implicit references
     like "that place I mentioned down south".
     """
     print("🐢 spaCy found nothing — falling back to Claude for entity extraction")
@@ -115,7 +124,8 @@ Query: {query}"""
             return []
 
         parsed = json.loads(match.group(0))
-        return parsed.get("entities", [])
+        entities = parsed.get("entities", [])
+        return [e for e in entities if e.strip("[]").lower() not in PII_PLACEHOLDERS]
     except Exception as e:
         print(f"⚠️ Claude entity extraction failed: {e}")
         return []
@@ -128,7 +138,7 @@ def extract_query_entities(query: str) -> list:
       2. Claude fallback (~2.5s) — only when spaCy finds nothing,
          catches vague references like "that thing we discussed"
 
-    Fast path for the common case, full reasoning for the hard case.
+    PII placeholders are stripped from both paths.
     """
     if _nlp is not None:
         doc = _nlp(query)
@@ -143,7 +153,7 @@ def extract_query_entities(query: str) -> list:
         ]
 
         # Noun chunks — catches common nouns like "chess", "data scientist"
-        # that NER misses but which ARE Entity nodes in the graph
+        # that NER misses but which are Entity nodes in the graph
         stopword_roots = {"it", "this", "that", "thing", "something",
                           "anything", "everything", "i", "you", "we", "they"}
         noun_chunks = [
@@ -156,11 +166,14 @@ def extract_query_entities(query: str) -> list:
 
         combined = list(dict.fromkeys(entities + noun_chunks))  # dedupe, preserve order
 
+        # Drop redaction placeholders — "[PERSON]" is not a thing to search for
+        combined = [e for e in combined if e.strip("[]").lower() not in PII_PLACEHOLDERS]
+
         if combined:
             print(f"⚡ spaCy entities: {combined}")
             return combined[:5]
 
-    # Nothing found locally — escalate to Claude
+    # Nothing usable found locally — escalate to Claude
     return _extract_entities_with_claude(query)
 
 
@@ -211,7 +224,7 @@ def hybrid_rank(vector_hits: list, graph_hits: list, top_k: int = 5) -> list:
     """
     Merge results, dedupe by id, score:
         relevance × 0.5 + recency × 0.2 + trust × 0.3
-    Boost score 1.15× if memory appeared in BOTH vector AND graph.
+    Boost score 1.15× if a memory appeared in BOTH vector AND graph results.
     """
     merged = {}
 
@@ -243,7 +256,7 @@ def hybrid_rank(vector_hits: list, graph_hits: list, top_k: int = 5) -> list:
 # Public entry point — unchanged signature.
 # ──────────────────────────────────────────────────────────────
 def retrieve_memories(query: str, user_id: str = "default", top_k: int = 5) -> list:
-    """Hybrid retrieval: vector + graph traversal, merged and ranked."""
+    """Hybrid retrieval: vector search + graph traversal, merged and ranked."""
     vector_hits = vector_search(query, user_id, top_k=8)
     graph_hits = graph_traversal(query, user_id, depth=2)
 

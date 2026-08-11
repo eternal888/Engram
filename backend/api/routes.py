@@ -4,7 +4,9 @@ from datetime import datetime
 from backend.agents.orchestrator import chat, process_memory_background
 from backend.graph.graph_client import graph_client
 from backend.core.auth import get_current_user
-
+from fastapi.responses import StreamingResponse
+from backend.agents.orchestrator import chat, chat_stream, process_memory_background
+import json
 router = APIRouter()
 
 
@@ -156,3 +158,50 @@ def feedback_endpoint(
         return {"status": "edited", "node_id": request.node_id}
 
     raise HTTPException(status_code=400, detail="Invalid feedback type")
+
+@router.post("/chat/stream")
+def chat_stream_endpoint(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Server-Sent Events variant of /chat.
+
+    Tokens are pushed as Claude generates them rather than buffered until the
+    full response exists. Memory processing is scheduled when the stream emits
+    its 'done' event.
+    """
+    trace_id_holder = {}
+    safe_message_holder = {}
+
+    def event_source():
+        for chunk in chat_stream(request.message, user_id):
+            # Intercept the terminal event to capture what the background
+            # task needs, then strip safe_message before forwarding.
+            if '"type": "done"' in chunk:
+                payload = json.loads(chunk[len("data: "):].strip())
+                trace_id_holder["value"] = payload.get("trace_id")
+                safe_message_holder["value"] = payload.pop("safe_message", "")
+                yield f"data: {json.dumps(payload)}\n\n"
+            else:
+                yield chunk
+
+        # Stream is exhausted — schedule memory processing
+        if safe_message_holder.get("value"):
+            background_tasks.add_task(
+                process_memory_background,
+                safe_message_holder["value"],
+                user_id,
+                trace_id_holder.get("value"),
+            )
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",   # stops nginx buffering the stream
+        },
+    )

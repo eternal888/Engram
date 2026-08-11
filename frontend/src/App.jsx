@@ -12,7 +12,6 @@ const TYPE_COLOR = {
 }
 const FALLBACK = '#6b7280'
 
-// Per-agent colors for the trace bars
 const AGENT_COLOR = {
   pii_scrubber:        '#4ec9a3',
   retrieval:           '#5b9bff',
@@ -25,6 +24,8 @@ const AGENT_COLOR = {
 
 /* ──────────────────────────────────────────────────────────────
    Axios instance with auth token auto-injection + 401 logout.
+   Used for everything except the streaming endpoint, which needs
+   fetch() to read a ReadableStream.
    ────────────────────────────────────────────────────────────── */
 const api = axios.create({ baseURL: API_URL })
 
@@ -153,6 +154,14 @@ function StyleTokens() {
 
       @keyframes egfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
       .eg-fade{animation:egfade .35s ease both}
+
+      /* streaming cursor */
+      @keyframes egcursor{0%,49%{opacity:1}50%,100%{opacity:0}}
+      .eg-cursor{
+        display:inline-block;width:7px;height:14px;background:var(--episode);
+        margin-left:2px;vertical-align:text-bottom;
+        animation:egcursor 1s steps(1) infinite;
+      }
 
       .eg-auth-wrap{
         min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
@@ -291,13 +300,13 @@ function AuthScreen({ onAuthed }) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Trace panel — collapsed by default, expands to show agent runs.
+   Trace panel.
    ────────────────────────────────────────────────────────────── */
 function TracePanel({ refreshTrigger }) {
   const [open, setOpen] = useState(false)
   const [traces, setTraces] = useState([])
   const [expandedId, setExpandedId] = useState(null)
-  const [details, setDetails] = useState({})   // trace_id -> events[]
+  const [details, setDetails] = useState({})
   const [loading, setLoading] = useState(false)
 
   const loadTraces = useCallback(async () => {
@@ -312,13 +321,12 @@ function TracePanel({ refreshTrigger }) {
     }
   }, [])
 
-  // Refresh when opened, and after each new chat turn (if open)
   useEffect(() => { if (open) loadTraces() }, [open, refreshTrigger, loadTraces])
 
   const toggleDetail = async (traceId) => {
     if (expandedId === traceId) { setExpandedId(null); return }
     setExpandedId(traceId)
-    if (details[traceId]) return          // already fetched, don't refetch
+    if (details[traceId]) return
     try {
       const res = await api.get(`/traces/${traceId}`)
       setDetails(prev => ({ ...prev, [traceId]: res.data.events || [] }))
@@ -706,25 +714,105 @@ function AppInner({ email, onLogout }) {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages, loading])
 
+  /**
+   * Streams the response over SSE.
+   *
+   * Uses fetch() rather than the browser's EventSource because EventSource
+   * can't set an Authorization header. We read the ReadableStream manually
+   * and parse SSE frames ourselves.
+   */
   const sendMessage = async () => {
     if (!input.trim() || loading) return
     const userMessage = input
     setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }])
+
+    // Index the assistant message will occupy: current length + 1 (user msg)
+    const assistantIndex = messages.length + 1
+
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content: '', memories: null, grounding: null, streaming: true },
+    ])
     setLoading(true)
+
     try {
-      const res = await api.post(`/chat`, { message: userMessage })
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: res.data.response,
-        memories: res.data.memories_used,
-        contradictions: res.data.contradictions,
-        grounding: res.data.grounding,
-      }])
-      setGraphRefresh(prev => prev + 1)
+      const token = localStorage.getItem('engram_token')
+      const res = await fetch(`${API_URL}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ message: userMessage }),
+      })
+
+      if (res.status === 401) { _onUnauthorized && _onUnauthorized(); return }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE frames are separated by a blank line
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop()          // trailing piece may be incomplete
+
+        for (const frame of frames) {
+          const line = frame.trim()
+          if (!line.startsWith('data:')) continue
+
+          let evt
+          try {
+            evt = JSON.parse(line.slice(5).trim())
+          } catch {
+            continue                   // malformed frame, skip
+          }
+
+          setMessages(prev => {
+            const next = [...prev]
+            const msg = { ...next[assistantIndex] }
+
+            if (evt.type === 'token') {
+              msg.content += evt.text
+            } else if (evt.type === 'memories') {
+              msg.memories = evt.memories
+            } else if (evt.type === 'grounding') {
+              msg.grounding = evt.grounding
+            } else if (evt.type === 'status') {
+              msg.stage = evt.stage
+            } else if (evt.type === 'error') {
+              msg.content = `Error: ${evt.message}`
+              msg.streaming = false
+            } else if (evt.type === 'done') {
+              msg.streaming = false
+              msg.stage = null
+            }
+
+            next[assistantIndex] = msg
+            return next
+          })
+
+          if (evt.type === 'done') setGraphRefresh(prev => prev + 1)
+        }
+      }
     } catch (err) {
       console.error(err)
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to backend.' }])
+      setMessages(prev => {
+        const next = [...prev]
+        next[assistantIndex] = {
+          ...next[assistantIndex],
+          content: 'Error connecting to backend.',
+          streaming: false,
+        }
+        return next
+      })
     } finally {
       setLoading(false)
     }
@@ -740,6 +828,9 @@ function AppInner({ email, onLogout }) {
   }
 
   const groundingColor = (s) => s >= 0.8 ? 'var(--concept)' : s >= 0.5 ? '#f5c84e' : 'var(--contradiction)'
+
+  const lastMsg = messages[messages.length - 1]
+  const showStageIndicator = loading && lastMsg?.role === 'assistant' && lastMsg?.content === ''
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -774,88 +865,97 @@ function AppInner({ email, onLogout }) {
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <div key={i} className="eg-fade" style={{ display: 'flex', marginBottom: 14,
-                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                <div className={msg.role === 'user' ? 'eg-bubble-user' : 'eg-bubble-ai'}
-                  style={{ maxWidth: '86%', borderRadius: 12, padding: '13px 16px', fontSize: 14, lineHeight: 1.5 }}>
-                  <div style={{ whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>{msg.content}</div>
+            {messages.map((msg, i) => {
+              // Skip rendering the empty placeholder — the stage indicator covers it
+              if (msg.role === 'assistant' && msg.content === '' && msg.streaming) return null
 
-                  {msg.grounding && (
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <span className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
-                          Grounding
-                        </span>
-                        <span className="eg-mono" style={{ color: groundingColor(msg.grounding.grounding_score), fontWeight: 500 }}>
-                          {(msg.grounding.grounding_score * 100).toFixed(0)}%
-                        </span>
+              return (
+                <div key={i} className="eg-fade" style={{ display: 'flex', marginBottom: 14,
+                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div className={msg.role === 'user' ? 'eg-bubble-user' : 'eg-bubble-ai'}
+                    style={{ maxWidth: '86%', borderRadius: 12, padding: '13px 16px', fontSize: 14, lineHeight: 1.5 }}>
+                    <div style={{ whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>
+                      {msg.content}
+                      {msg.streaming && <span className="eg-cursor" />}
+                    </div>
+
+                    {msg.grounding && (
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
+                            Grounding
+                          </span>
+                          <span className="eg-mono" style={{ color: groundingColor(msg.grounding.grounding_score), fontWeight: 500 }}>
+                            {(msg.grounding.grounding_score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        {msg.grounding.citations?.length > 0 && (
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ color: 'var(--ink-dim)', marginBottom: 4 }}>✓ Verified</div>
+                            {msg.grounding.citations.map((c, j) => (
+                              <div key={j} style={{ color: 'var(--ink-dim)', marginLeft: 8, marginBottom: 2 }}>
+                                {c.claim.substring(0, 80)}…
+                                <span style={{ color: 'var(--concept)', marginLeft: 6 }} className="eg-mono">
+                                  {(c.trust_score * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {msg.grounding.ungrounded_claims?.length > 0 && (
+                          <div>
+                            <div style={{ color: '#f5c84e', marginBottom: 4 }}>⚠ Unverified</div>
+                            {msg.grounding.ungrounded_claims.map((c, j) => (
+                              <div key={j} style={{ color: 'var(--ink-faint)', marginLeft: 8 }}>{c.substring(0, 80)}…</div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {msg.grounding.citations?.length > 0 && (
-                        <div style={{ marginBottom: 8 }}>
-                          <div style={{ color: 'var(--ink-dim)', marginBottom: 4 }}>✓ Verified</div>
-                          {msg.grounding.citations.map((c, j) => (
-                            <div key={j} style={{ color: 'var(--ink-dim)', marginLeft: 8, marginBottom: 2 }}>
-                              {c.claim.substring(0, 80)}…
-                              <span style={{ color: 'var(--concept)', marginLeft: 6 }} className="eg-mono">
-                                {(c.trust_score * 100).toFixed(0)}%
+                    )}
+
+                    {msg.memories?.length > 0 && (
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
+                        <div className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10, marginBottom: 6 }}>
+                          Memories used
+                        </div>
+                        {msg.memories.map((m, j) => (
+                          <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0', gap: 10 }}>
+                            <span style={{ color: 'var(--ink-dim)' }}>
+                              <span className="eg-sw" style={{ color: TYPE_COLOR[m.type] || FALLBACK, background: TYPE_COLOR[m.type] || FALLBACK, marginRight: 7 }} />
+                              {m.text}
+                              <span className="eg-mono" style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
+                                {(m.similarity * 100).toFixed(0)}%
                               </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {msg.grounding.ungrounded_claims?.length > 0 && (
-                        <div>
-                          <div style={{ color: '#f5c84e', marginBottom: 4 }}>⚠ Unverified</div>
-                          {msg.grounding.ungrounded_claims.map((c, j) => (
-                            <div key={j} style={{ color: 'var(--ink-faint)', marginLeft: 8 }}>{c.substring(0, 80)}…</div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {msg.memories?.length > 0 && (
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
-                      <div className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10, marginBottom: 6 }}>
-                        Memories used
-                      </div>
-                      {msg.memories.map((m, j) => (
-                        <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0', gap: 10 }}>
-                          <span style={{ color: 'var(--ink-dim)' }}>
-                            <span className="eg-sw" style={{ color: TYPE_COLOR[m.type] || FALLBACK, background: TYPE_COLOR[m.type] || FALLBACK, marginRight: 7 }} />
-                            {m.text}
-                            <span className="eg-mono" style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
-                              {(m.similarity * 100).toFixed(0)}%
                             </span>
-                          </span>
-                          <span style={{ display: 'flex', gap: 6 }}>
-                            <button className="eg-fb ok" title="Mark correct" onClick={() => sendFeedback(m.id, 'correct')}>✓</button>
-                            <button className="eg-fb no" title="Mark incorrect" onClick={() => sendFeedback(m.id, 'incorrect')}>✗</button>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                            <span style={{ display: 'flex', gap: 6 }}>
+                              <button className="eg-fb ok" title="Mark correct" onClick={() => sendFeedback(m.id, 'correct')}>✓</button>
+                              <button className="eg-fb no" title="Mark incorrect" onClick={() => sendFeedback(m.id, 'incorrect')}>✗</button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
-                  {msg.contradictions?.length > 0 && (
-                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,93,108,0.3)', fontSize: 12 }}>
-                      <div style={{ color: 'var(--contradiction)', marginBottom: 4 }}>⚠ Contradictions detected</div>
-                      {msg.contradictions.map((c, j) => (
-                        <div key={j} style={{ color: 'var(--ink-dim)' }}>
-                          {c.existing_fact} → superseded by → {c.new_fact}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                    {msg.contradictions?.length > 0 && (
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,93,108,0.3)', fontSize: 12 }}>
+                        <div style={{ color: 'var(--contradiction)', marginBottom: 4 }}>⚠ Contradictions detected</div>
+                        {msg.contradictions.map((c, j) => (
+                          <div key={j} style={{ color: 'var(--ink-dim)' }}>
+                            {c.existing_fact} → superseded by → {c.new_fact}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
 
-            {loading && (
+            {showStageIndicator && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                 <div className="eg-bubble-ai eg-mono" style={{ borderRadius: 12, padding: '13px 16px', color: 'var(--ink-dim)', fontSize: 13 }}>
-                  thinking<span style={{ animation: 'egblink 1.2s infinite' }}>…</span>
+                  {lastMsg?.stage || 'thinking'}
+                  <span style={{ animation: 'egblink 1.2s infinite' }}>…</span>
                 </div>
               </div>
             )}
