@@ -49,7 +49,20 @@ QUERY_ENTITIES = [
     "US_PASSPORT",
     "US_DRIVER_LICENSE",
 ]
-
+# Public document path — pages fetched from a URL. Names and places in a
+# public article aren't private data; redacting them destroys the content's
+# usefulness. Contact details are still scrubbed in case a page carries them.
+PUBLIC_DOC_ENTITIES = [
+    "EMAIL_ADDRESS",
+    "PHONE_NUMBER",
+    "CREDIT_CARD",
+    "US_SSN",
+    "IP_ADDRESS",
+    "IBAN_CODE",
+    "US_BANK_NUMBER",
+    "US_PASSPORT",
+    "US_DRIVER_LICENSE",
+]
 # One-time init — spaCy load is expensive
 _analyzer = AnalyzerEngine()
 _anonymizer = AnonymizerEngine()

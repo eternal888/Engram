@@ -81,7 +81,7 @@ def chat(message: str, user_id: str = "default") -> dict:
 
     # ── Step 1: Retrieve relevant memories ──
     with trace_agent(trace_id, user_id, "retrieval", input_summary=safe_message[:200]) as event:
-        memories = retrieve_memories(safe_message, user_id=user_id, top_k=3)
+        memories = retrieve_memories(safe_message, user_id=user_id, top_k=6)
         event["output_summary"] = f"{len(memories)} memories retrieved"
 
     context = build_context(memories)
@@ -156,7 +156,7 @@ def chat_stream(message: str, user_id: str):
         yield sse({"type": "status", "stage": "retrieving"})
 
         with trace_agent(trace_id, user_id, "retrieval", input_summary=safe_message[:200]) as event:
-            memories = retrieve_memories(safe_message, user_id=user_id, top_k=3)
+            memories = retrieve_memories(safe_message, user_id=user_id, top_k=6)
             event["output_summary"] = f"{len(memories)} memories retrieved"
 
         # Send memories immediately so the provenance panel can render while

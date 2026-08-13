@@ -85,7 +85,7 @@ def write_consolidated_concept(theme: dict, episodes: list, user_id: str) -> str
 
     # Create the consolidated concept
     graph_client.run("""
-        CREATE (c:Concept {
+        CREATE (c:Concept:Memory {
             id: $id,
             content: $content,
             user_id: $user_id,

@@ -16,6 +16,7 @@ from backend.ingestion.pipeline import (
     list_user_documents,
     delete_document,
 )
+from backend.core.pii_scrubber import PUBLIC_DOC_ENTITIES
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -86,6 +87,7 @@ def ingest_url(
         document_name=doc_name,
         document_source="url",
         source_url=str(request.url),
+        scrub_entities=PUBLIC_DOC_ENTITIES,
     )
     if result["error"]:
         raise HTTPException(status_code=500, detail=result["error"])

@@ -31,6 +31,7 @@ def ingest_text(
     document_name: str,
     document_source: str,  # "upload" | "url"
     source_url: str = None,
+    scrub_entities: list = None,
 ) -> dict:
     """
     Full ingestion pipeline for a chunk of raw text.
@@ -41,7 +42,7 @@ def ingest_text(
                 "error": "empty text"}
 
     # 1. Scrub PII across the whole document once (efficient)
-    scrub_result = scrub(text)
+    scrub_result = scrub(text, entities=scrub_entities)
     safe_text = scrub_result["scrubbed_text"]
     had_pii = scrub_result["had_pii"]
 
@@ -66,7 +67,7 @@ def ingest_text(
         embedding = embed_text(chunk["text"])
 
         graph_client.run("""
-            CREATE (s:Source {
+            CREATE (s:Source:Memory{
                 id: $id,
                 user_id: $user_id,
                 content: $content,

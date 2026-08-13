@@ -5,6 +5,13 @@ from backend.core.embeddings import embed_text
 
 
 def write_memory(extraction_result: dict):
+    """
+    Writes an extraction result to the graph as Episode / Entity / Concept nodes.
+
+    Every node carrying an embedding also gets the :Memory label. The vector
+    index is defined over :Memory, so a node without it is invisible to
+    semantic search regardless of whether it has an embedding.
+    """
     user_id = extraction_result["user_id"]
     episode_id = extraction_result["episode_id"]
     extracted = extraction_result["extracted"]
@@ -15,7 +22,8 @@ def write_memory(extraction_result: dict):
     # Write Episode node
     graph_client.run("""
         MERGE (e:Episode {id: $id})
-        SET e.user_id = $user_id,
+        SET e:Memory,
+            e.user_id = $user_id,
             e.raw_text = $raw_text,
             e.summary = $summary,
             e.embedding = $embedding,
@@ -38,7 +46,8 @@ def write_memory(extraction_result: dict):
         entity_embedding = embed_text(entity["name"] + " " + entity["description"])
         graph_client.run("""
             MERGE (en:Entity {name: $name, user_id: $user_id})
-            SET en.id = coalesce(en.id, $id),
+            SET en:Memory,
+                en.id = coalesce(en.id, $id),
                 en.type = $type,
                 en.description = $description,
                 en.embedding = $embedding,
@@ -65,7 +74,8 @@ def write_memory(extraction_result: dict):
         concept_embedding = embed_text(fact["content"])
         graph_client.run("""
             MERGE (c:Concept {content: $content, user_id: $user_id})
-            SET c.id = coalesce(c.id, $id),
+            SET c:Memory,
+                c.id = coalesce(c.id, $id),
                 c.confidence = $confidence,
                 c.embedding = $embedding,
                 c.created_at = $created_at,
