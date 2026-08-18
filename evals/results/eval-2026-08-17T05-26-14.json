@@ -1,0 +1,62 @@
+{
+  "started_at": "2026-08-17T05:26:14.193380",
+  "suites": {
+    "contradiction": {
+      "suite": "contradiction",
+      "n": 5,
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 1,
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "pass_rate": 0.8,
+      "cases": [
+        {
+          "id": "con-001",
+          "setup": "My favorite sport is cricket",
+          "followup": "Actually my favorite sport is football",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "direct conflict \u2014 one favorite sport"
+        },
+        {
+          "id": "con-002",
+          "setup": "I live in Hyderabad",
+          "followup": "I moved to Mumbai last week",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "location change supersedes"
+        },
+        {
+          "id": "con-003",
+          "setup": "I like coffee",
+          "followup": "I also like tea",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "compatible \u2014 liking both is not a conflict"
+        },
+        {
+          "id": "con-004",
+          "setup": "I play guitar",
+          "followup": "I play piano",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "compatible \u2014 can play both instruments"
+        },
+        {
+          "id": "con-005",
+          "setup": "I am vegetarian",
+          "followup": "I had steak for dinner",
+          "detected": false,
+          "expected": true,
+          "passed": false,
+          "note": "genuine conflict"
+        }
+      ]
+    }
+  }
+}

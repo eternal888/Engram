@@ -1,0 +1,133 @@
+{
+  "retrieval": [
+    {
+      "id": "ret-001",
+      "setup": ["My favorite color is teal"],
+      "query": "what's my favorite color",
+      "expect_memory_containing": "teal",
+      "expect_answer_containing": "teal"
+    },
+    {
+      "id": "ret-002",
+      "setup": ["I work as a data scientist in Hyderabad"],
+      "query": "where do I work",
+      "expect_memory_containing": "Hyderabad",
+      "expect_answer_containing": "Hyderabad"
+    },
+    {
+      "id": "ret-003",
+      "setup": ["I play chess every weekend with my brother"],
+      "query": "what do I do on weekends",
+      "expect_memory_containing": "chess",
+      "expect_answer_containing": "chess"
+    },
+    {
+      "id": "ret-004",
+      "setup": ["My dog is named Max and he's a golden retriever"],
+      "query": "tell me about my pet",
+      "expect_memory_containing": "Max",
+      "expect_answer_containing": "Max"
+    },
+    {
+      "id": "ret-005",
+      "setup": [
+        "I'm learning Spanish",
+        "I'm also learning to play guitar",
+        "I started running last month"
+      ],
+      "query": "what am I currently learning",
+      "expect_memory_containing": "Spanish",
+      "expect_answer_containing": "Spanish"
+    },
+    {
+      "id": "ret-006",
+      "setup": ["I'm allergic to peanuts"],
+      "query": "is there any food I should avoid",
+      "expect_memory_containing": "peanut",
+      "expect_answer_containing": "peanut"
+    },
+    {
+      "id": "ret-007",
+      "setup": ["My sister lives in Toronto and works in finance"],
+      "query": "what does my sister do",
+      "expect_memory_containing": "finance",
+      "expect_answer_containing": "finance"
+    },
+    {
+      "id": "ret-008",
+      "setup": ["I prefer working late at night, I'm most productive after 10pm"],
+      "query": "when am I most productive",
+      "expect_memory_containing": "night",
+      "expect_answer_containing": "night"
+    }
+  ],
+
+  "grounding": [
+    {
+      "id": "gnd-001",
+      "setup": ["My favorite color is teal"],
+      "query": "what's my favorite color",
+      "expect_grounding_above": 0.5,
+      "note": "answer is fully supported by memory"
+    },
+    {
+      "id": "gnd-002",
+      "setup": ["I like chess"],
+      "query": "what is the capital of France",
+      "expect_grounding_below": 0.5,
+      "note": "answer comes from training, not memory — should score low"
+    },
+    {
+      "id": "gnd-003",
+      "setup": ["I work at a startup"],
+      "query": "explain quantum entanglement",
+      "expect_grounding_below": 0.4,
+      "note": "entirely unsupported by memory"
+    },
+    {
+      "id": "gnd-004",
+      "setup": ["I moved to Bangalore in 2024", "I work as an engineer"],
+      "query": "where do I live and what do I do",
+      "expect_grounding_above": 0.5,
+      "note": "both facts in memory"
+    }
+  ],
+
+  "contradiction": [
+    {
+      "id": "con-001",
+      "setup": ["My favorite sport is cricket"],
+      "followup": "Actually my favorite sport is football",
+      "expect_contradiction": true,
+      "note": "direct conflict — one favorite sport"
+    },
+    {
+      "id": "con-002",
+      "setup": ["I live in Hyderabad"],
+      "followup": "I moved to Mumbai last week",
+      "expect_contradiction": true,
+      "note": "location change supersedes"
+    },
+    {
+      "id": "con-003",
+      "setup": ["I like coffee"],
+      "followup": "I also like tea",
+      "expect_contradiction": false,
+      "note": "compatible — liking both is not a conflict"
+    },
+    {
+      "id": "con-004",
+      "setup": ["I play guitar"],
+      "followup": "I play piano",
+      "expect_contradiction": false,
+      "note": "compatible — can play both instruments"
+    },
+    {
+      "id": "con-005",
+      "setup": ["I am vegetarian"],
+      "followup": "I had steak for dinner",
+      "expect_contradiction": true,
+      "note": "genuine conflict"
+    }
+  ]
+}
