@@ -127,7 +127,124 @@
       "setup": ["I am vegetarian"],
       "followup": "I had steak for dinner",
       "expect_contradiction": true,
-      "note": "genuine conflict"
+      "note": "identity conflicts with behaviour; semantically distant, reached via recency"
+    },
+
+    {
+      "id": "con-006",
+      "setup": [
+        "I work as a backend engineer",
+        "I have a cat named Biscuit",
+        "I'm learning to cook Thai food",
+        "My favorite author is Ursula Le Guin",
+        "I usually go to bed around midnight"
+      ],
+      "followup": "I bought a new pair of running shoes",
+      "expect_contradiction": false,
+      "note": "NEGATIVE under recency load — five unrelated recent memories in the window, none conflicting"
+    },
+    {
+      "id": "con-007",
+      "setup": [
+        "My sister lives in Toronto",
+        "I'm reading a book about urban planning",
+        "I had a dentist appointment on Tuesday"
+      ],
+      "followup": "I live in Boston",
+      "expect_contradiction": false,
+      "note": "NEGATIVE — different subjects. Sister's city and my city are separate attributes"
+    },
+    {
+      "id": "con-008",
+      "setup": [
+        "I like Rust",
+        "I subscribe to two programming newsletters",
+        "I contributed to an open source project last year"
+      ],
+      "followup": "I wrote a script in Python this morning",
+      "expect_contradiction": false,
+      "note": "NEGATIVE — a stated preference does not exclude a single instance of something else"
+    },
+    {
+      "id": "con-009",
+      "setup": [
+        "I work at a startup",
+        "My commute takes about 40 minutes",
+        "I take my lunch break around 1pm"
+      ],
+      "followup": "I started doing freelance design work on weekends",
+      "expect_contradiction": false,
+      "note": "NEGATIVE — additive, not exclusive. Two jobs can coexist"
+    },
+    {
+      "id": "con-010",
+      "setup": [
+        "I go to the gym on Monday mornings",
+        "I drink a protein shake after workouts",
+        "I've been tracking my sleep with a watch"
+      ],
+      "followup": "I went hiking on Saturday",
+      "expect_contradiction": false,
+      "note": "NEGATIVE — topically adjacent and recent, but no mutual exclusion"
+    },
+    {
+      "id": "con-011",
+      "setup": [
+        "I love cold weather",
+        "I moved north partly for the winters",
+        "I own three heavy coats"
+      ],
+      "followup": "I turned the heater on last night",
+      "expect_contradiction": false,
+      "note": "NEGATIVE — superficially opposite, but preference and behaviour are different attributes"
+    },
+
+    {
+      "id": "con-012",
+      "setup": [
+        "I have never been to Japan",
+        "I've been saving up for a big trip",
+        "I'm learning some basic Japanese phrases"
+      ],
+      "followup": "I spent two weeks in Tokyo last year",
+      "expect_contradiction": true,
+      "note": "POSITIVE — negation conflicts with a specific history claim"
+    },
+    {
+      "id": "con-013",
+      "setup": [
+        "I don't drink alcohol",
+        "I usually order sparkling water at dinner",
+        "I've been going to bed earlier lately"
+      ],
+      "followup": "I had a few beers at the party on Friday",
+      "expect_contradiction": true,
+      "note": "POSITIVE — abstinence conflicts with behaviour, same shape as con-005"
+    },
+    {
+      "id": "con-014",
+      "setup": [
+        "I have two cats",
+        "I buy their food in bulk",
+        "My apartment has a balcony"
+      ],
+      "followup": "I don't own any pets",
+      "expect_contradiction": true,
+      "note": "POSITIVE — quantity conflict, a stated count against a denial"
+    },
+    {
+      "id": "con-015",
+      "setup": [
+        "I'm training for a marathon and run every morning",
+        "I bought a foam roller",
+        "My favorite podcast is about architecture",
+        "I switched to a standing desk",
+        "I've been drinking more water",
+        "I started a sourdough starter"
+      ],
+      "followup": "I haven't exercised in months",
+      "expect_contradiction": true,
+      "note": "POSITIVE under noise — the conflicting memory is the oldest of six; tests recency window depth"
     }
   ]
 }

@@ -1,0 +1,299 @@
+{
+  "started_at": "2026-08-18T23:39:15.406103",
+  "suites": {
+    "retrieval": {
+      "suite": "retrieval",
+      "n": 8,
+      "precision_at_3": 1.0,
+      "precision_at_5": 1.0,
+      "mrr": 0.9375,
+      "answer_accuracy": 1.0,
+      "pass_rate": 1.0,
+      "avg_latency_ms": 6588,
+      "cases": [
+        {
+          "id": "ret-001",
+          "query": "what's my favorite color",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 5576,
+          "passed": true
+        },
+        {
+          "id": "ret-002",
+          "query": "where do I work",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 6014,
+          "passed": true
+        },
+        {
+          "id": "ret-003",
+          "query": "what do I do on weekends",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 6674,
+          "passed": true
+        },
+        {
+          "id": "ret-004",
+          "query": "tell me about my pet",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 4815,
+          "passed": true
+        },
+        {
+          "id": "ret-005",
+          "query": "what am I currently learning",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 7659,
+          "passed": true
+        },
+        {
+          "id": "ret-006",
+          "query": "is there any food I should avoid",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 7887,
+          "passed": true
+        },
+        {
+          "id": "ret-007",
+          "query": "what does my sister do",
+          "memory_rank": 1,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 1.0,
+          "answer_ok": true,
+          "latency_ms": 5115,
+          "passed": true
+        },
+        {
+          "id": "ret-008",
+          "query": "when am I most productive",
+          "memory_rank": 2,
+          "hit_at_3": true,
+          "hit_at_5": true,
+          "reciprocal_rank": 0.5,
+          "answer_ok": true,
+          "latency_ms": 8967,
+          "passed": true
+        }
+      ]
+    },
+    "grounding": {
+      "suite": "grounding",
+      "n": 4,
+      "pass_rate": 1.0,
+      "cases": [
+        {
+          "id": "gnd-001",
+          "query": "what's my favorite color",
+          "grounding_score": 1.0,
+          "expectation": "> 0.5",
+          "n_citations": 1,
+          "n_ungrounded": 0,
+          "passed": true,
+          "note": "answer is fully supported by memory"
+        },
+        {
+          "id": "gnd-002",
+          "query": "what is the capital of France",
+          "grounding_score": 0.0,
+          "expectation": "< 0.5",
+          "n_citations": 0,
+          "n_ungrounded": 4,
+          "passed": true,
+          "note": "answer comes from training, not memory \u2014 should score low"
+        },
+        {
+          "id": "gnd-003",
+          "query": "explain quantum entanglement",
+          "grounding_score": 0.0,
+          "expectation": "< 0.4",
+          "n_citations": 0,
+          "n_ungrounded": 7,
+          "passed": true,
+          "note": "entirely unsupported by memory"
+        },
+        {
+          "id": "gnd-004",
+          "query": "where do I live and what do I do",
+          "grounding_score": 1.0,
+          "expectation": "> 0.5",
+          "n_citations": 3,
+          "n_ungrounded": 0,
+          "passed": true,
+          "note": "both facts in memory"
+        }
+      ]
+    },
+    "contradiction": {
+      "suite": "contradiction",
+      "n": 15,
+      "true_positives": 7,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "pass_rate": 1.0,
+      "cases": [
+        {
+          "id": "con-001",
+          "setup": "My favorite sport is cricket",
+          "followup": "Actually my favorite sport is football",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "direct conflict \u2014 one favorite sport"
+        },
+        {
+          "id": "con-002",
+          "setup": "I live in Hyderabad",
+          "followup": "I moved to Mumbai last week",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "location change supersedes"
+        },
+        {
+          "id": "con-003",
+          "setup": "I like coffee",
+          "followup": "I also like tea",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "compatible \u2014 liking both is not a conflict"
+        },
+        {
+          "id": "con-004",
+          "setup": "I play guitar",
+          "followup": "I play piano",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "compatible \u2014 can play both instruments"
+        },
+        {
+          "id": "con-005",
+          "setup": "I am vegetarian",
+          "followup": "I had steak for dinner",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "identity conflicts with behaviour; semantically distant, reached via recency"
+        },
+        {
+          "id": "con-006",
+          "setup": "I work as a backend engineer",
+          "followup": "I bought a new pair of running shoes",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "NEGATIVE under recency load \u2014 five unrelated recent memories in the window, none conflicting"
+        },
+        {
+          "id": "con-007",
+          "setup": "My sister lives in Toronto",
+          "followup": "I live in Boston",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "NEGATIVE \u2014 different subjects. Sister's city and my city are separate attributes"
+        },
+        {
+          "id": "con-008",
+          "setup": "I like Rust",
+          "followup": "I wrote a script in Python this morning",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "NEGATIVE \u2014 a stated preference does not exclude a single instance of something else"
+        },
+        {
+          "id": "con-009",
+          "setup": "I work at a startup",
+          "followup": "I started doing freelance design work on weekends",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "NEGATIVE \u2014 additive, not exclusive. Two jobs can coexist"
+        },
+        {
+          "id": "con-010",
+          "setup": "I go to the gym on Monday mornings",
+          "followup": "I went hiking on Saturday",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "NEGATIVE \u2014 topically adjacent and recent, but no mutual exclusion"
+        },
+        {
+          "id": "con-011",
+          "setup": "I love cold weather",
+          "followup": "I turned the heater on last night",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "note": "NEGATIVE \u2014 superficially opposite, but preference and behaviour are different attributes"
+        },
+        {
+          "id": "con-012",
+          "setup": "I have never been to Japan",
+          "followup": "I spent two weeks in Tokyo last year",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "POSITIVE \u2014 negation conflicts with a specific history claim"
+        },
+        {
+          "id": "con-013",
+          "setup": "I don't drink alcohol",
+          "followup": "I had a few beers at the party on Friday",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "POSITIVE \u2014 abstinence conflicts with behaviour, same shape as con-005"
+        },
+        {
+          "id": "con-014",
+          "setup": "I have two cats",
+          "followup": "I don't own any pets",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "POSITIVE \u2014 quantity conflict, a stated count against a denial"
+        },
+        {
+          "id": "con-015",
+          "setup": "I'm training for a marathon and run every morning",
+          "followup": "I haven't exercised in months",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "note": "POSITIVE under noise \u2014 the conflicting memory is the oldest of six; tests recency window depth"
+        }
+      ]
+    }
+  }
+}
