@@ -1,11 +1,8 @@
-import anthropic
+
 import json
 import uuid
 from datetime import datetime, timezone
-
-from backend.core.config import ANTHROPIC_API_KEY
-
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+from backend.core.llm_client import client
 
 EXTRACTION_PROMPT = """You are a memory extraction agent. Given a conversation turn, extract structured memory.
 
@@ -25,6 +22,10 @@ Return ONLY valid JSON with this exact structure:
 
 Rules:
 - Only extract what is explicitly stated
+- Extract facts about the user and the world, never facts about the
+  conversation itself. "User asked about X" is not a memory — it records
+  that a question was asked, not anything true of the user. If a turn is
+  purely a question and states nothing, return an empty facts list.
 - Confidence score 0.0 to 1.0
 - Return valid JSON only, no other text"""
 
