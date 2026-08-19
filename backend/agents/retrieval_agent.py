@@ -1,13 +1,13 @@
-import anthropic
 import json
+import os
 import re
 import spacy
 from datetime import datetime
+
+from backend.core.llm_client import client
 from backend.graph.graph_client import graph_client
 from backend.core.embeddings import embed_text
-from backend.core.config import ANTHROPIC_API_KEY
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # Load spaCy's small model once at import (~0.5s, 12MB).
 # Used for fast local entity extraction — avoids a Claude round-trip.
@@ -25,6 +25,10 @@ PII_PLACEHOLDERS = {
     "us_bank_number", "us_passport", "us_driver_license",
     "date_time", "nrp", "url",
 }
+
+# Index returns its LIMIT whether anything matches or not — a guitar query
+# was pulling engram memories at 0.55 and the model ran with them.
+MIN_RELEVANCE = float(os.getenv("RETRIEVAL_MIN_RELEVANCE", "0.6"))
 
 
 def recency_score(created_at: str) -> float:
@@ -83,7 +87,7 @@ def vector_search(query: str, user_id: str, top_k: int = 8) -> list:
         "confirmations": r["confirmations"],
         "created_at": r["created_at"],
         "source": "vector",
-    } for r in results]
+    } for r in results if r["score"] >= MIN_RELEVANCE]
 
 
 # ──────────────────────────────────────────────────────────────
