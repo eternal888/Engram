@@ -41,6 +41,8 @@ MAX_CANDIDATES = int(os.getenv("CONTRADICTION_MAX_CANDIDATES", "30"))
 MIN_CONFIDENCE = float(os.getenv("CONTRADICTION_MIN_CONFIDENCE", "0.7"))
 JUDGE_MODEL = os.getenv("CONTRADICTION_MODEL", "claude-sonnet-4-5")
 
+NO_USAGE = {"tokens_input": 0, "tokens_output": 0}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -172,13 +174,17 @@ def _extract_json(raw: str) -> dict:
     return json.loads(raw[start:end + 1])
 
 
-def judge_candidates(new_fact: str, candidates: list) -> list:
+def judge_candidates(new_fact: str, candidates: list) -> tuple:
     """
-    One call for the whole candidate set. Returns raw verdicts; the caller
-    applies the confidence floor.
+    One call for the whole candidate set.
+
+    Returns (verdicts, usage). The caller applies the confidence floor and
+    accumulates usage across facts — a single turn can produce several facts,
+    each costing a judge call, so reporting one call's tokens would understate
+    a multi-fact turn severalfold.
     """
     if not candidates:
-        return []
+        return [], dict(NO_USAGE)
 
     listing = "\n".join(
         f"[{i}] {c['content']}" for i, c in enumerate(candidates)
@@ -223,10 +229,14 @@ contradictions; return an empty list if there are none.
             max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
+        usage = {
+            "tokens_input": response.usage.input_tokens,
+            "tokens_output": response.usage.output_tokens,
+        }
         parsed = _extract_json(response.content[0].text.strip())
     except Exception as exc:
         print(f"[contradiction] judge call failed: {exc}")
-        return []
+        return [], dict(NO_USAGE)
 
     verdicts = []
     for item in parsed.get("contradictions", []):
@@ -242,7 +252,7 @@ contradictions; return an empty list if there are none.
             "winner": item.get("winner", "neither"),
             "confidence": float(item.get("confidence", 0.0)),
         })
-    return verdicts
+    return verdicts, usage
 
 
 def _record(user_id: str, new_fact: str, verdict: dict) -> None:
@@ -309,8 +319,18 @@ def _record(user_id: str, new_fact: str, verdict: dict) -> None:
         )
 
 
-def detect_contradictions(new_facts: list, user_id: str) -> list:
+def detect_contradictions(new_facts: list, user_id: str) -> dict:
+    """
+    Returns a dict rather than a bare list so the caller can record cost.
+
+    One judge call is made per fact, so usage accumulates across the loop.
+    A single conversational turn frequently yields two or three facts — the
+    marathon case produces both "training for a marathon" and "runs every
+    morning" from one sentence — so per-turn cost is a multiple of one call.
+    """
     contradictions = []
+    tokens_in = 0
+    tokens_out = 0
 
     for fact in new_facts:
         content = fact.get("content")
@@ -321,7 +341,11 @@ def detect_contradictions(new_facts: list, user_id: str) -> list:
         if not candidates:
             continue
 
-        for verdict in judge_candidates(content, candidates):
+        verdicts, usage = judge_candidates(content, candidates)
+        tokens_in += usage["tokens_input"]
+        tokens_out += usage["tokens_output"]
+
+        for verdict in verdicts:
             if verdict["confidence"] < MIN_CONFIDENCE:
                 print(
                     f"[contradiction] below confidence floor "
@@ -348,13 +372,7 @@ def detect_contradictions(new_facts: list, user_id: str) -> list:
                 "similarity": candidate["similarity"],
             })
 
-    return contradictions
-
-
-def get_contradiction_stats(user_id: str) -> dict:
-    """Channel attribution — useful for evals and the Week 14 writeup."""
-    rows = graph_client.run("""
-        MATCH (con:Contradiction {user_id: $user_id})
-        RETURN con.channel AS channel, con.status AS status, count(*) AS n
-        """, {"user_id": user_id})
-    return {"breakdown": rows, "total": sum(r["n"] for r in rows)}
+    return {
+        "contradictions": contradictions,
+        "usage": {"tokens_input": tokens_in, "tokens_output": tokens_out},
+    }

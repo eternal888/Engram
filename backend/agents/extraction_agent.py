@@ -1,7 +1,8 @@
 import anthropic
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+
 from backend.core.config import ANTHROPIC_API_KEY
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -28,6 +29,18 @@ Rules:
 - Return valid JSON only, no other text"""
 
 
+def _extract_json(raw: str) -> dict:
+    """
+    Take the outermost JSON object. Tolerates code fences and any prose the
+    model puts around them, which the previous split("```") approach did not.
+    """
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError(f"no JSON object in response: {raw[:200]}")
+    return json.loads(raw[start:end + 1])
+
+
 def extract_memory(text: str, user_id: str = "default") -> dict:
     response = client.messages.create(
         model="claude-sonnet-4-5",
@@ -43,18 +56,19 @@ def extract_memory(text: str, user_id: str = "default") -> dict:
     raw = response.content[0].text.strip()
     print("Raw response:", raw)
 
-    # strip markdown code blocks if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-
-    extracted = json.loads(raw)
+    extracted = _extract_json(raw)
 
     return {
         "episode_id": str(uuid.uuid4()),
         "user_id": user_id,
         "raw_text": text,
         "extracted": extracted,
-        "created_at": datetime.utcnow().isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        # Surfaced so the caller's trace_agent context can record cost.
+        # Without this the TraceEvent shows zero tokens for extraction, which
+        # makes the eval harness understate spend by several times over.
+        "usage": {
+            "tokens_input": response.usage.input_tokens,
+            "tokens_output": response.usage.output_tokens,
+        },
     }

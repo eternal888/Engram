@@ -1,0 +1,14 @@
+{
+  "started_at": "2026-08-19T04:05:08.672977+00:00",
+  "mode": "ablation",
+  "suite": "contradiction",
+  "rows": [
+    {
+      "variant": "no-vector-search",
+      "prec": 1.0,
+      "recall": 1.0,
+      "tokens": 16730,
+      "calls": 54
+    }
+  ]
+}

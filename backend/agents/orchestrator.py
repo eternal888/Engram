@@ -1,5 +1,6 @@
 import anthropic
 import json
+
 from backend.core.config import ANTHROPIC_API_KEY
 from backend.core.pii_scrubber import scrub, QUERY_ENTITIES
 from backend.core.tracing import new_trace_id, trace_agent
@@ -21,6 +22,23 @@ Always use the provided memories to give personalized, contextual responses.
 If memories are relevant, reference them naturally in your response.
 When you see placeholders like [PERSON], [EMAIL_ADDRESS], [PHONE_NUMBER], [LOCATION], etc.,
 these represent redacted personal information — respond naturally around them but do not fabricate values."""
+
+
+def _record_usage(event: dict, result) -> None:
+    """
+    Copy an agent's token usage onto its trace event.
+
+    Agents that call the model do so inside their own module, so the response
+    object never reaches this file. They surface the counts under a "usage" key
+    instead. Silently a no-op when that key is absent, so an agent that has not
+    been updated yet reports zero rather than raising — the tracing layer must
+    never break the thing it observes.
+    """
+    if isinstance(result, dict):
+        usage = result.get("usage")
+        if isinstance(usage, dict):
+            event["tokens_input"] = usage.get("tokens_input", 0)
+            event["tokens_output"] = usage.get("tokens_output", 0)
 
 
 def build_context(memories: list) -> str:
@@ -46,10 +64,19 @@ def process_memory_background(safe_message: str, user_id: str, trace_id: str):
         with trace_agent(trace_id, user_id, "extraction", input_summary=safe_message[:200]) as event:
             extraction = extract_memory(safe_message, user_id=user_id)
             facts = extraction["extracted"]["facts"]
+            _record_usage(event, extraction)
             event["output_summary"] = f"{len(facts)} facts extracted"
 
         with trace_agent(trace_id, user_id, "contradiction") as event:
-            contradictions = detect_contradictions(facts, user_id=user_id)
+            result = detect_contradictions(facts, user_id=user_id)
+            # detect_contradictions returns a bare list in its current form and
+            # a dict once updated to report usage. Accept both so this file can
+            # be deployed independently of that change.
+            if isinstance(result, dict):
+                contradictions = result.get("contradictions", [])
+                _record_usage(event, result)
+            else:
+                contradictions = result
             event["output_summary"] = f"{len(contradictions)} contradictions found"
 
         with trace_agent(trace_id, user_id, "memory_writer") as event:
@@ -104,6 +131,7 @@ def chat(message: str, user_id: str = "default") -> dict:
     # ── Step 3: Ground the response ──
     with trace_agent(trace_id, user_id, "grounding") as event:
         grounding = ground_response(answer, memories)
+        _record_usage(event, grounding)
         event["output_summary"] = f"score={grounding.get('grounding_score')}"
 
     return {
@@ -194,6 +222,7 @@ def chat_stream(message: str, user_id: str):
 
         with trace_agent(trace_id, user_id, "grounding") as event:
             grounding = ground_response(answer, memories)
+            _record_usage(event, grounding)
             event["output_summary"] = f"score={grounding.get('grounding_score')}"
 
         yield sse({"type": "grounding", "grounding": grounding})

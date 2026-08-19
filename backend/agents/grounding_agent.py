@@ -1,8 +1,24 @@
 import anthropic
 import json
+
 from backend.core.config import ANTHROPIC_API_KEY
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+NO_USAGE = {"tokens_input": 0, "tokens_output": 0}
+
+
+def _extract_json(raw: str) -> dict:
+    """
+    Take the outermost JSON object. Tolerates code fences and surrounding prose,
+    which the previous split("```") approach did not — a stray word before the
+    fence would raise and take the whole grounding step down with it.
+    """
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError(f"no JSON object in response: {raw[:200]}")
+    return json.loads(raw[start:end + 1])
 
 
 def ground_response(response_text: str, memories: list) -> dict:
@@ -12,7 +28,9 @@ def ground_response(response_text: str, memories: list) -> dict:
             "citations": [],
             "grounding_score": 0.0,
             "ungrounded_claims": [],
-            "is_grounded": False
+            "is_grounded": False,
+            # No model call made, but the caller records usage unconditionally.
+            "usage": dict(NO_USAGE),
         }
 
     memory_text = "\n".join([
@@ -53,33 +71,43 @@ Rules:
         messages=[{"role": "user", "content": prompt}]
     )
 
-    raw = result.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
+    usage = {
+        "tokens_input": result.usage.input_tokens,
+        "tokens_output": result.usage.output_tokens,
+    }
 
-    parsed = json.loads(raw)
+    parsed = _extract_json(result.content[0].text.strip())
 
     citations = []
     ungrounded = []
 
     for claim in parsed.get("claims", []):
-        if claim["is_grounded"] and claim.get("memory_index"):
-            idx = claim["memory_index"] - 1
-            if 0 <= idx < len(memories):
+        # Every field accessed with .get(): a missing key in one claim object
+        # should not fail the whole verification pass.
+        text = claim.get("claim", "")
+        if not text:
+            continue
+
+        idx = claim.get("memory_index")
+        if claim.get("is_grounded") and idx is not None:
+            i = int(idx) - 1
+            if 0 <= i < len(memories):
                 citations.append({
-                    "claim": claim["claim"],
-                    "memory": memories[idx],
-                    "trust_score": claim["trust_score"]
+                    "claim": text,
+                    "memory": memories[i],
+                    "trust_score": claim.get("trust_score", 0.0),
                 })
+            else:
+                # Claimed grounded but cited a memory that does not exist.
+                ungrounded.append(text)
         else:
-            ungrounded.append(claim["claim"])
+            ungrounded.append(text)
 
     return {
         "grounded_response": response_text,
         "citations": citations,
         "grounding_score": parsed.get("grounding_score", 0.0),
         "ungrounded_claims": ungrounded,
-        "is_grounded": parsed.get("is_grounded", False)
+        "is_grounded": parsed.get("is_grounded", False),
+        "usage": usage,
     }

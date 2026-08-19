@@ -1,0 +1,266 @@
+{
+  "started_at": "2026-08-19T04:21:37.156672+00:00",
+  "suites": {
+    "contradiction": {
+      "suite": "contradiction",
+      "n": 15,
+      "true_positives": 7,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "pass_rate": 1.0,
+      "channel_counts": {
+        "both": 5,
+        "recency": 2
+      },
+      "cost": {
+        "agent_calls": 385,
+        "llm_calls": 110,
+        "tokens_in": 23116,
+        "tokens_out": 11300,
+        "tokens_total": 34416,
+        "by_agent": {
+          "pii_scrubber": {
+            "calls": 55,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0
+          },
+          "retrieval": {
+            "calls": 55,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0
+          },
+          "response_generation": {
+            "calls": 55,
+            "tokens_in": 12078,
+            "tokens_out": 4895,
+            "tokens_total": 16973
+          },
+          "grounding": {
+            "calls": 55,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0
+          },
+          "memory_writer": {
+            "calls": 55,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0
+          },
+          "extraction": {
+            "calls": 55,
+            "tokens_in": 11038,
+            "tokens_out": 6405,
+            "tokens_total": 17443
+          },
+          "contradiction": {
+            "calls": 55,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0
+          }
+        }
+      },
+      "cases": [
+        {
+          "id": "con-001",
+          "setup": "My favorite sport is cricket",
+          "followup": "Actually my favorite sport is football",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "both"
+          ],
+          "note": "direct conflict \u2014 one favorite sport",
+          "tokens": 1023,
+          "llm_calls": 4
+        },
+        {
+          "id": "con-002",
+          "setup": "I live in Hyderabad",
+          "followup": "I moved to Mumbai last week",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "both"
+          ],
+          "note": "location change supersedes",
+          "tokens": 1150,
+          "llm_calls": 4
+        },
+        {
+          "id": "con-003",
+          "setup": "I like coffee",
+          "followup": "I also like tea",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "compatible \u2014 liking both is not a conflict",
+          "tokens": 1009,
+          "llm_calls": 4
+        },
+        {
+          "id": "con-004",
+          "setup": "I play guitar",
+          "followup": "I play piano",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "compatible \u2014 can play both instruments",
+          "tokens": 1039,
+          "llm_calls": 4
+        },
+        {
+          "id": "con-005",
+          "setup": "I am vegetarian",
+          "followup": "I had steak for dinner",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "recency"
+          ],
+          "note": "identity conflicts with behaviour; semantically distant, reached via recency",
+          "tokens": 1099,
+          "llm_calls": 4
+        },
+        {
+          "id": "con-006",
+          "setup": "I work as a backend engineer",
+          "followup": "I bought a new pair of running shoes",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "NEGATIVE under recency load \u2014 five unrelated recent memories in the window, none conflicting",
+          "tokens": 4039,
+          "llm_calls": 12
+        },
+        {
+          "id": "con-007",
+          "setup": "My sister lives in Toronto",
+          "followup": "I live in Boston",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "NEGATIVE \u2014 different subjects. Sister's city and my city are separate attributes",
+          "tokens": 2581,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-008",
+          "setup": "I like Rust",
+          "followup": "I wrote a script in Python this morning",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "NEGATIVE \u2014 a stated preference does not exclude a single instance of something else",
+          "tokens": 2486,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-009",
+          "setup": "I work at a startup",
+          "followup": "I started doing freelance design work on weekends",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "NEGATIVE \u2014 additive, not exclusive. Two jobs can coexist",
+          "tokens": 2552,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-010",
+          "setup": "I go to the gym on Monday mornings",
+          "followup": "I went hiking on Saturday",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "NEGATIVE \u2014 topically adjacent and recent, but no mutual exclusion",
+          "tokens": 2575,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-011",
+          "setup": "I love cold weather",
+          "followup": "I turned the heater on last night",
+          "detected": false,
+          "expected": false,
+          "passed": true,
+          "channels": [],
+          "note": "NEGATIVE \u2014 superficially opposite, but preference and behaviour are different attributes",
+          "tokens": 2456,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-012",
+          "setup": "I have never been to Japan",
+          "followup": "I spent two weeks in Tokyo last year",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "both"
+          ],
+          "note": "POSITIVE \u2014 negation conflicts with a specific history claim",
+          "tokens": 2595,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-013",
+          "setup": "I don't drink alcohol",
+          "followup": "I had a few beers at the party on Friday",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "both"
+          ],
+          "note": "POSITIVE \u2014 abstinence conflicts with behaviour, same shape as con-005",
+          "tokens": 2469,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-014",
+          "setup": "I have two cats",
+          "followup": "I don't own any pets",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "both"
+          ],
+          "note": "POSITIVE \u2014 quantity conflict, a stated count against a denial",
+          "tokens": 2486,
+          "llm_calls": 8
+        },
+        {
+          "id": "con-015",
+          "setup": "I'm training for a marathon and run every morning",
+          "followup": "I haven't exercised in months",
+          "detected": true,
+          "expected": true,
+          "passed": true,
+          "channels": [
+            "recency"
+          ],
+          "note": "POSITIVE under noise \u2014 the conflicting memory is the oldest of six; tests recency window depth",
+          "tokens": 4857,
+          "llm_calls": 14
+        }
+      ]
+    }
+  }
+}
