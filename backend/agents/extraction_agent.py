@@ -2,7 +2,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
-from backend.core.llm_client import client
+from backend.core.llm_client import client, MODEL_EXTRACTION
 
 EXTRACTION_PROMPT = """You are a memory extraction agent. Given a conversation turn, extract structured memory.
 
@@ -44,7 +44,7 @@ def _extract_json(raw: str) -> dict:
 
 def extract_memory(text: str, user_id: str = "default") -> dict:
     response = client.messages.create(
-        model="claude-sonnet-4-5",
+        model=MODEL_EXTRACTION,
         max_tokens=1000,
         messages=[
             {

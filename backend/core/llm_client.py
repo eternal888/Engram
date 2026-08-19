@@ -33,7 +33,7 @@ MAX_RETRIES = int(os.getenv("ANTHROPIC_MAX_RETRIES", "2"))
 # call sites are not yet wired to read them, so changing these has no effect
 # until that follow-up lands.
 MODEL_DEFAULT = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-MODEL_EXTRACTION = os.getenv("EXTRACTION_MODEL", MODEL_DEFAULT)
+MODEL_EXTRACTION = os.getenv("EXTRACTION_MODEL", "claude-haiku-4-5-20251001")
 MODEL_GROUNDING = os.getenv("GROUNDING_MODEL", MODEL_DEFAULT)
 MODEL_RESPONSE = os.getenv("RESPONSE_MODEL", MODEL_DEFAULT)
 
