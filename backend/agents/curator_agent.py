@@ -1,11 +1,8 @@
-import anthropic
 import json
-from backend.core.config import ANTHROPIC_API_KEY
+from backend.core.llm_client import client
 from backend.graph.graph_client import graph_client
 from backend.graph.versioning import version_node
 import numpy as np
-
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 
 def cosine_similarity(vec1, vec2):

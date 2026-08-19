@@ -1,9 +1,6 @@
-import anthropic
+
 import json
-
-from backend.core.config import ANTHROPIC_API_KEY
-
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+from backend.core.llm_client import client
 
 NO_USAGE = {"tokens_input": 0, "tokens_output": 0}
 

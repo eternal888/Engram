@@ -1,7 +1,6 @@
-import anthropic
-import json
 
-from backend.core.config import ANTHROPIC_API_KEY
+import json
+from backend.core.llm_client import client
 from backend.core.pii_scrubber import scrub, QUERY_ENTITIES
 from backend.core.tracing import new_trace_id, trace_agent
 from backend.agents.extraction_agent import extract_memory
@@ -10,11 +9,7 @@ from backend.agents.retrieval_agent import retrieve_memories
 from backend.agents.contradiction_agent import detect_contradictions
 from backend.agents.grounding_agent import ground_response
 
-client = anthropic.Anthropic(
-    api_key=ANTHROPIC_API_KEY,
-    timeout=120.0,      # generous — streaming holds the connection open
-    max_retries=2,
-)
+
 
 SYSTEM_PROMPT = """You are a helpful assistant with memory.
 You have access to memories from past conversations.

@@ -24,15 +24,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-import anthropic
 import numpy as np
-
-from backend.core.config import ANTHROPIC_API_KEY
+from backend.core.llm_client import client
 from backend.core.embeddings import embed_text
 from backend.graph.graph_client import graph_client
 from backend.graph.versioning import version_node
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # Tunable from the environment so the eval harness can sweep them without edits.
 SIM_THRESHOLD = float(os.getenv("CONTRADICTION_SIM_THRESHOLD", "0.3"))

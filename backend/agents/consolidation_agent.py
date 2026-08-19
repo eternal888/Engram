@@ -1,12 +1,12 @@
-import anthropic
+
 import json
 import uuid
 from datetime import datetime
-from backend.core.config import ANTHROPIC_API_KEY
+from backend.core.llm_client import client
 from backend.graph.graph_client import graph_client
 from backend.core.embeddings import embed_text
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
 
 
 def get_unconsolidated_episodes(user_id: str, limit: int = 20) -> list:
