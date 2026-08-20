@@ -18,6 +18,7 @@ on both paths.
 """
 
 from presidio_analyzer import AnalyzerEngine
+from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig
 
@@ -63,8 +64,16 @@ PUBLIC_DOC_ENTITIES = [
     "US_PASSPORT",
     "US_DRIVER_LICENSE",
 ]
+
+# Presidio defaults to en_core_web_lg (400MB, downloaded at startup). We load
+# sm instead — same pattern-based detection, smaller NER model.
+_provider = NlpEngineProvider(nlp_configuration={
+    "nlp_engine_name": "spacy",
+    "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+})
+
 # One-time init — spaCy load is expensive
-_analyzer = AnalyzerEngine()
+_analyzer = AnalyzerEngine(nlp_engine=_provider.create_engine())
 _anonymizer = AnonymizerEngine()
 
 
