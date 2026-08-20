@@ -51,6 +51,7 @@ api.interceptors.response.use(
 )
 
 const shortId = () => Math.random().toString(16).slice(2, 9)
+const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 const clockTime = () =>
   new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
@@ -321,7 +322,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
         idMap.set(n.id, i)
         return {
           id: n.id, idx: i, type,
-          label: (n.label || type || '').toString().slice(0, 34).toUpperCase(),
+          label: truncate((n.label || type || '').toString().toUpperCase(), 22),
           r: 7 + Math.sqrt(Math.max(0.05, strength)) * 11 + (type === 'Contradiction' ? 3 : 0),
           x: w * 0.5 + (Math.random() - 0.5) * w * 0.6,
           y: h * 0.5 + (Math.random() - 0.5) * h * 0.7,
@@ -383,7 +384,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i], b = nodes[j]
           const dx = a.x - b.x, dy = a.y - b.y
-          const min = a.r + b.r + 46
+          const min = a.r + b.r + 66
           const d2 = dx * dx + dy * dy
           if (d2 < min * min && d2 > 0.01) {
             const d = Math.sqrt(d2), f = 0.7 * (1 - d / min) / d
@@ -395,7 +396,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
         const a = nodes[e.a], b = nodes[e.b]
         const dx = b.x - a.x, dy = b.y - a.y
         const d = Math.hypot(dx, dy) || 0.001
-        const f = (d - 130) * 0.0026
+        const f = (d - 175) * 0.0026
         a.vx += (dx / d) * f; a.vy += (dy / d) * f
         b.vx -= (dx / d) * f; b.vy -= (dy / d) * f
       }
@@ -440,12 +441,9 @@ function MemoryGraphPanel({ refreshTrigger }) {
         ctx.restore()
       }
 
-      const showLabels = nodes.length <= LABEL_LIMIT
       for (const n of nodes) {
         const c = NODE[n.type] || FALLBACK
-        const isFocus = focus === n.idx
         ctx.save()
-        ctx.globalAlpha = dim(n.idx)
 
         ctx.fillStyle = c.ring
         ctx.globalAlpha = dim(n.idx) * 0.5
@@ -460,18 +458,48 @@ function MemoryGraphPanel({ refreshTrigger }) {
           ctx.lineWidth = 4
           ctx.beginPath(); ctx.arc(n.x, n.y, n.r - 2, 0, Math.PI * 2); ctx.stroke()
         }
-        if (isFocus) {
+        if (focus === n.idx) {
           ctx.strokeStyle = '#191715'
           ctx.lineWidth = 1.5
           ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 11, 0, Math.PI * 2); ctx.stroke()
         }
+        ctx.restore()
+      }
 
-        if (showLabels || isFocus) {
-          ctx.font = '700 9.5px "JetBrains Mono", monospace'
-          ctx.fillStyle = c.label
-          ctx.textBaseline = 'middle'
-          ctx.fillText(n.label, n.x + n.r + 11, n.y)
-        }
+      // Labels last, so a node never covers one. A label flips to the left
+      // when it would leave the panel, and is skipped when it would land on
+      // one already placed — the focused node always wins its slot.
+      ctx.font = '700 9.5px "JetBrains Mono", monospace'
+      ctx.textBaseline = 'middle'
+      const placed = []
+      const order = focus >= 0 ? [nodes[focus], ...nodes.filter(n => n.idx !== focus)] : nodes
+      const showAll = nodes.length <= LABEL_LIMIT
+
+      for (const n of order) {
+        const isFocus = focus === n.idx
+        if (!showAll && !isFocus) continue
+
+        const w = ctx.measureText(n.label).width
+        const gap = n.r + 11
+        const flip = n.x + gap + w > W - 10
+        const x = flip ? n.x - gap - w : n.x + gap
+        const box = { x, y: n.y - 7, w, h: 14 }
+
+        const clash = placed.some(p =>
+          box.x < p.x + p.w && box.x + box.w > p.x &&
+          box.y < p.y + p.h && box.y + box.h > p.y
+        )
+        if (clash && !isFocus) continue
+        placed.push(box)
+
+        const c = NODE[n.type] || FALLBACK
+        ctx.save()
+        ctx.globalAlpha = dim(n.idx)
+        // knock the cream back out from under the text so edges don't cross it
+        ctx.fillStyle = '#f4ecdc'
+        ctx.fillRect(box.x - 3, box.y, w + 6, 14)
+        ctx.fillStyle = c.label
+        ctx.fillText(n.label, x, n.y)
         ctx.restore()
       }
     }
@@ -621,6 +649,85 @@ function Brackets() {
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Minimal markdown. Covers what the model actually emits — headings,
+   bold, inline code, bullets, numbered lists. Not a full parser.
+   ────────────────────────────────────────────────────────────── */
+function inline(text, keyBase) {
+  const parts = []
+  const re = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g
+  let last = 0, m, i = 0
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    const tok = m[0]
+    if (tok.startsWith('**')) {
+      parts.push(<strong key={`${keyBase}b${i++}`}>{tok.slice(2, -2)}</strong>)
+    } else if (tok.startsWith('`')) {
+      parts.push(
+        <code key={`${keyBase}c${i++}`} style={{ fontFamily: 'var(--mono)', fontSize: '0.88em',
+          background: 'var(--n200)', padding: '1px 5px' }}>{tok.slice(1, -1)}</code>
+      )
+    } else {
+      parts.push(<em key={`${keyBase}i${i++}`}>{tok.slice(1, -1)}</em>)
+    }
+    last = m.index + tok.length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
+function Markdown({ text }) {
+  const blocks = []
+  let list = null
+
+  const flush = () => {
+    if (!list) return
+    const Tag = list.ordered ? 'ol' : 'ul'
+    blocks.push(
+      <Tag key={`l${blocks.length}`} style={{ margin: '8px 0', paddingLeft: 22 }}>
+        {list.items.map((it, i) => (
+          <li key={i} style={{ margin: '3px 0', lineHeight: 1.55 }}>{inline(it, `${blocks.length}-${i}`)}</li>
+        ))}
+      </Tag>
+    )
+    list = null
+  }
+
+  for (const raw of (text || '').split('\n')) {
+    const line = raw.trimEnd()
+    const heading = line.match(/^(#{1,6})\s+(.*)$/)
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/)
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/)
+
+    if (heading) {
+      flush()
+      const level = heading[1].length
+      blocks.push(
+        <div key={`h${blocks.length}`} style={{ margin: '14px 0 6px', fontWeight: 700,
+          fontSize: level <= 2 ? 15.5 : 14.5, letterSpacing: '-0.01em' }}>
+          {inline(heading[2], `h${blocks.length}`)}
+        </div>
+      )
+    } else if (bullet || numbered) {
+      const ordered = !!numbered
+      const item = (bullet || numbered)[1]
+      if (!list || list.ordered !== ordered) { flush(); list = { ordered, items: [] } }
+      list.items.push(item)
+    } else if (line.trim() === '') {
+      flush()
+    } else {
+      flush()
+      blocks.push(
+        <p key={`p${blocks.length}`} style={{ margin: '8px 0', lineHeight: 1.55 }}>
+          {inline(line, `p${blocks.length}`)}
+        </p>
+      )
+    }
+  }
+  flush()
+  return <>{blocks}</>
+}
+
+/* ──────────────────────────────────────────────────────────────
    Grounding block. Collapsed by default; a weak score opens itself.
    ────────────────────────────────────────────────────────────── */
 const SEGMENTS = 22
@@ -638,9 +745,11 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
   const filled = Math.round(score * SEGMENTS)
   const tone = weak ? 'var(--accent)' : 'var(--ink)'
 
-  const summary = weak
-    ? `needs review · ${cited.length}/${total || 1} verified · ${mems.length} memories`
-    : `${cited.length}/${total || 1} verified · ${mems.length} memories`
+  const summary = total === 0
+    ? `no claims to check · ${mems.length} memories`
+    : weak
+      ? `needs review · ${cited.length}/${total} verified · ${mems.length} memories`
+      : `${cited.length}/${total} verified · ${mems.length} memories`
 
   return (
     <div style={{ marginTop: 14 }}>
@@ -787,8 +896,10 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
               <div style={{ display: 'flex', gap: 15 }}>
                 <span className="eg-rule" data-weak={weak} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 15, lineHeight: 1.55 }}>
-                    {msg.content}
+                  <div style={{ fontSize: 15, lineHeight: 1.55 }}>
+                    {msg.role === 'assistant'
+                      ? <Markdown text={msg.content} />
+                      : <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>}
                     {msg.streaming && <span className="eg-caret" />}
                   </div>
                   {msg.grounding && (
