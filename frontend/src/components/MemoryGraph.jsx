@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import axios from 'axios'
 
-const API_URL = 'http://localhost:8000/api'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
 const COLORS = {
   Episode: '#3b82f6',      // blue
