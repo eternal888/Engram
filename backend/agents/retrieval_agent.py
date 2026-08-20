@@ -26,6 +26,15 @@ PII_PLACEHOLDERS = {
     "date_time", "nrp", "url",
 }
 
+# Traversal walks only memory nodes. Without this it expands through
+# TraceEvent and User nodes, which blows up the pattern match.
+MEMORY_LABELS = ["Episode", "Concept", "Entity", "Source", "Contradiction"]
+
+# Determiners and possessives spaCy leaves on noun chunks. "my sleep" will
+# never CONTAINS-match an Entity named "sleep".
+LEADING_WORDS = {"a", "an", "the", "my", "your", "our", "their", "his",
+                 "her", "its", "this", "that", "these", "those", "some", "any"}
+
 # Index returns its LIMIT whether anything matches or not — a guitar query
 # was pulling engram memories at 0.55 and the model ran with them.
 MIN_RELEVANCE = float(os.getenv("RETRIEVAL_MIN_RELEVANCE", "0.6"))
@@ -41,6 +50,14 @@ def recency_score(created_at: str) -> float:
         return max(0.0, min(1.0, 1.0 - age_days / 30))
     except Exception:
         return 0.5
+
+
+def _strip_leading(term: str) -> str:
+    """Drop determiners so anchors match stored entity names."""
+    words = term.strip().split()
+    while words and words[0].lower() in LEADING_WORDS:
+        words.pop(0)
+    return " ".join(words)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -114,12 +131,6 @@ Query: {query}"""
         )
         raw = response.content[0].text.strip()
 
-        # Strip markdown fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-
         # Claude sometimes appends prose after the JSON — extract just the
         # first {...} block rather than parsing the whole response.
         match = re.search(r'\{.*?\}', raw, re.DOTALL)
@@ -168,7 +179,9 @@ def extract_query_entities(query: str) -> list:
             and chunk.root.text.lower() not in stopword_roots
         ]
 
-        combined = list(dict.fromkeys(entities + noun_chunks))  # dedupe, preserve order
+        combined = [_strip_leading(e) for e in entities + noun_chunks]
+        combined = [e for e in combined if len(e) > 2]
+        combined = list(dict.fromkeys(combined))  # dedupe, preserve order
 
         # Drop redaction placeholders — "[PERSON]" is not a thing to search for
         combined = [e for e in combined if e.strip("[]").lower() not in PII_PLACEHOLDERS]
@@ -178,7 +191,7 @@ def extract_query_entities(query: str) -> list:
             return combined[:5]
 
     # Nothing usable found locally — escalate to Claude
-    return _extract_entities_with_claude(query)
+    return [_strip_leading(e) for e in _extract_entities_with_claude(query)]
 
 
 def graph_traversal(query: str, user_id: str, depth: int = 2) -> list:
@@ -189,15 +202,25 @@ def graph_traversal(query: str, user_id: str, depth: int = 2) -> list:
 
     print(f"🔍 Graph traversal anchored on entities: {entities}")
 
+    # Anchors are bounded before expanding, and every node on the path must
+    # be a memory node. Without both, this expands through TraceEvent nodes
+    # and Aura raises an internal CypherExecution error.
     results = graph_client.run("""
         MATCH (anchor)
         WHERE anchor.user_id = $user_id
+          AND any(l IN labels(anchor) WHERE l IN $types)
           AND any(name IN $entities WHERE
-              toLower(coalesce(anchor.name, anchor.content, '')) CONTAINS toLower(name))
-        MATCH (anchor)-[*1..2]-(connected)
+              toLower(coalesce(anchor.name, anchor.content, anchor.summary, ''))
+              CONTAINS toLower(name))
+        WITH anchor LIMIT 10
+
+        MATCH path = (anchor)-[*1..2]-(connected)
         WHERE connected.user_id = $user_id
           AND connected.id IS NOT NULL
-        RETURN DISTINCT 
+          AND connected.id <> anchor.id
+          AND all(n IN nodes(path)
+                  WHERE any(l IN labels(n) WHERE l IN $types))
+        RETURN DISTINCT
                labels(connected)[0] as type,
                connected.id as id,
                coalesce(connected.summary, connected.content, connected.name, '') as text,
@@ -206,7 +229,7 @@ def graph_traversal(query: str, user_id: str, depth: int = 2) -> list:
                connected.created_at as created_at,
                anchor.id as anchor_id
         LIMIT 20
-        """, {"user_id": user_id, "entities": entities})
+        """, {"user_id": user_id, "entities": entities, "types": MEMORY_LABELS})
 
     return [{
         "type": r["type"],
