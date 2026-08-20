@@ -407,20 +407,18 @@ function MemoryGraphPanel({ refreshTrigger }) {
       // Spacing follows the area each node can claim, so the graph fills the
       // panel at any count instead of clumping once it grows.
       const cell = Math.sqrt((W * H) / Math.max(1, nodes.length))
-      const rest = Math.max(70, Math.min(210, cell * 0.92))
+      const rest = Math.max(55, Math.min(160, cell * 0.66))
       const sep = Math.max(26, Math.min(70, cell * 0.46))
-      // Fewer nodes need holding together; many push themselves apart.
-      // The vertical pull is weaker so the layout uses the full panel height
-      // rather than settling into a horizontal band.
-      const pull = 0.0009 * Math.max(0.3, Math.min(1, 14 / Math.max(1, nodes.length)))
-
+      // Centre gravity holds a dense core; repulsion only opens it enough to
+      // read. Well-connected nodes settle inward, loose ones drift out.
+      const pull = 0.0026
       for (const n of nodes) {
         n.vx += (cx - n.x) * pull
-        n.vy += (cy - n.y) * pull * 0.55
+        n.vy += (cy - n.y) * pull * 0.8
       }
       // Inverse-square repulsion across every pair — this is what opens the
       // graph out. Overlap prevention alone only stops collisions.
-      const charge = cell * cell * 0.115
+      const charge = cell * cell * 0.06
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i], b = nodes[j]
@@ -428,7 +426,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
           let d2 = dx * dx + dy * dy
           if (d2 < 1) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = 1 }
           const d = Math.sqrt(d2)
-          const f = Math.min(charge / d2, 2.4) / d
+          const f = Math.min(charge / d2, 1.6) / d
           a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f
 
           const min = a.r + b.r + sep
