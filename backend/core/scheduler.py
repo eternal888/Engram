@@ -2,8 +2,18 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from backend.core.promotion import promote_memories, decay_confidence, prune_stale
 from backend.agents.curator_agent import run_curator
 from backend.agents.consolidation_agent import run_consolidation
+from backend.graph.graph_client import graph_client
 
 scheduler = BackgroundScheduler()
+
+
+def run_keepalive_job():
+    # Aura Free pauses after 3 days idle and deletes after 30. A trivial
+    # query every 12h keeps the instance alive.
+    try:
+        graph_client.run("RETURN 1")
+    except Exception as e:
+        print(f"❌ Keepalive job error: {e}")
 
 
 def run_promotion_job():
@@ -47,6 +57,7 @@ def run_consolidation_job():
 
 
 def start_scheduler():
+    scheduler.add_job(run_keepalive_job, 'interval', hours=12, id='keepalive')
     scheduler.add_job(run_promotion_job, 'interval', hours=1, id='promotion')
     scheduler.add_job(run_decay_job, 'interval', hours=6, id='decay')
     scheduler.add_job(run_pruning_job, 'interval', hours=12, id='pruning')
@@ -54,7 +65,7 @@ def start_scheduler():
     scheduler.add_job(run_consolidation_job, 'interval', hours=24, id='consolidation')
 
     scheduler.start()
-    print("✅ Scheduler started — promotion (1h), decay (6h), pruning (12h), curator (24h), consolidation (24h)")
+    print("✅ Scheduler started — keepalive (12h), promotion (1h), decay (6h), pruning (12h), curator (24h), consolidation (24h)")
 
 
 def stop_scheduler():
