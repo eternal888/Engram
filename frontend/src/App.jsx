@@ -1,31 +1,38 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import axios from 'axios'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
-const TYPE_COLOR = {
-  Episode:       '#5b9bff',
-  Concept:       '#4ec9a3',
-  Entity:        '#f59e5b',
-  Source:        '#b87dff',
-  Contradiction: '#ff5d6c',
+/* Node palette. Cream ground, so fills and rings do the work, not glow. */
+const NODE = {
+  Episode:       { fill: '#191715', ring: '#d5c5a4', label: '#191715' },
+  Concept:       { fill: '#a9740c', ring: '#e0cba4', label: '#7d520a' },
+  Entity:        { fill: '#fffdf7', ring: '#2f6b46', label: '#2f6b46' },
+  Source:        { fill: '#fffdf7', ring: '#8d8471', label: '#5c5344' },
+  Contradiction: { fill: '#f01f0a', ring: '#f7a99e', label: '#a81400' },
 }
-const FALLBACK = '#6b7280'
+const FALLBACK = { fill: '#8d8471', ring: '#d5c5a4', label: '#5c5344' }
 
 const AGENT_COLOR = {
-  pii_scrubber:        '#4ec9a3',
-  retrieval:           '#5b9bff',
-  response_generation: '#f59e5b',
-  grounding:           '#b87dff',
-  extraction:          '#4ec9a3',
-  contradiction:       '#ff5d6c',
-  memory_writer:       '#8a8a8e',
+  pii_scrubber:        '#2f6b46',
+  retrieval:           '#191715',
+  response_generation: '#a9740c',
+  grounding:           '#5c5344',
+  extraction:          '#2f6b46',
+  contradiction:       '#f01f0a',
+  memory_writer:       '#8d8471',
 }
+
+const NAV = [
+  { id: 'chat',      label: 'Chat' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'sessions',  label: 'Sessions' },
+  { id: 'trace',     label: 'Agent Trace' },
+]
 
 /* ──────────────────────────────────────────────────────────────
    Axios instance with auth token auto-injection + 401 logout.
-   Used for everything except the streaming endpoint, which needs
-   fetch() to read a ReadableStream.
+   Streaming uses fetch() so it can read a ReadableStream.
    ────────────────────────────────────────────────────────────── */
 const api = axios.create({ baseURL: API_URL })
 
@@ -43,173 +50,143 @@ api.interceptors.response.use(
   }
 )
 
+const shortId = () => Math.random().toString(16).slice(2, 9)
+const clockTime = () =>
+  new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
 /* ──────────────────────────────────────────────────────────────
-   Design tokens + fonts.
+   Design tokens.
    ────────────────────────────────────────────────────────────── */
 function StyleTokens() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
       :root{
-        --bg:#0a0a0a; --bg-2:#0d0d0f;
-        --ink:#ededed; --ink-dim:#8a8a8e; --ink-faint:#4a4a4f;
-        --line:rgba(255,255,255,0.06); --line-strong:rgba(255,255,255,0.12);
-        --episode:#5b9bff; --concept:#4ec9a3; --entity:#f59e5b;
-        --source:#b87dff; --contradiction:#ff5d6c;
-        --sans:"Space Grotesk",ui-sans-serif,system-ui,sans-serif;
+        --bg:#f4ecdc; --surface:#fbf5e9; --surface-2:#ece0c8;
+        --n200:#eee2ca; --n300:#ded1b5; --n400:#c7b593;
+        --n500:#a2957c; --n600:#7c7259; --n700:#5c5344;
+        --ink:#191715; --ink-dim:#5c5344; --ink-faint:#a2957c;
+        --accent:#f01f0a; --accent-700:#a81400; --accent-100:#fdece9;
+        --grid:#e6dcc6; --bracket:#c2b08c;
+        --sans:"Archivo",system-ui,sans-serif;
         --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
       }
       *{box-sizing:border-box}
-      html,body,#root{margin:0;padding:0;min-height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
-      body{background:radial-gradient(120% 80% at 50% 30%, #0e0e10 0%, #0a0a0a 55%, #060607 100%)}
-      ::-webkit-scrollbar{width:9px;height:9px}
+      html,body,#root{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+      ::-webkit-scrollbar{width:10px;height:10px}
       ::-webkit-scrollbar-track{background:transparent}
-      ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:6px}
-      ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.16)}
-
-      .eg-grid{
-        position:absolute;inset:0;pointer-events:none;
-        background-image:
-          linear-gradient(to right, rgba(255,255,255,0.035) 1px, transparent 1px),
-          linear-gradient(to bottom, rgba(255,255,255,0.035) 1px, transparent 1px);
-        background-size:56px 56px;
-        -webkit-mask-image:radial-gradient(ellipse at 50% 40%, #000 0%, rgba(0,0,0,0.6) 50%, transparent 82%);
-        mask-image:radial-gradient(ellipse at 50% 40%, #000 0%, rgba(0,0,0,0.6) 50%, transparent 82%);
-      }
+      ::-webkit-scrollbar-thumb{background:var(--n400)}
+      ::-webkit-scrollbar-thumb:hover{background:var(--n500)}
 
       .eg-mono{font-family:var(--mono)}
-      .eg-pill{
-        display:inline-flex;align-items:center;gap:8px;padding:6px 12px;
-        border:1px solid var(--line-strong);border-radius:999px;
-        background:rgba(20,20,22,0.55);backdrop-filter:blur(8px);
-        font-family:var(--mono);font-size:11px;color:var(--ink-dim);letter-spacing:0.04em;
-      }
-      .eg-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--concept);box-shadow:0 0 8px var(--concept)}
-
-      .eg-eyebrow{
-        display:inline-flex;align-items:center;gap:10px;
-        font-family:var(--mono);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;
-        color:var(--ink-dim);padding:6px 12px;border:1px solid var(--line-strong);
-        border-radius:999px;background:rgba(14,14,16,0.55);backdrop-filter:blur(6px);
-      }
-      .eg-eyebrow .seq,.eg-eyebrow .sep{color:var(--ink-faint)}
-
-      .eg-title{
-        font-family:var(--sans);font-weight:500;
-        font-size:clamp(56px,10vw,140px);line-height:0.92;letter-spacing:-0.045em;
-        margin:18px 0 14px;color:var(--ink);
-        text-shadow:0 0 60px rgba(91,155,255,0.08),0 0 120px rgba(78,201,163,0.05);
-      }
-      .eg-title .blink{
-        display:inline-block;width:0.16em;height:0.16em;border-radius:50%;
-        background:var(--episode);transform:translateY(-0.6em);margin-left:0.05em;
-        box-shadow:0 0 16px var(--episode);animation:egblink 2.8s ease-in-out infinite;
-      }
-      @keyframes egblink{0%,55%,100%{opacity:1}60%,68%{opacity:0.25}72%{opacity:1}}
-
-      .eg-tagline{
-        font-family:var(--sans);font-weight:400;font-size:clamp(15px,1.3vw,19px);
-        color:var(--ink-dim);max-width:620px;line-height:1.45;
-      }
-      .eg-tagline em{color:var(--ink);font-style:normal;font-weight:500}
-
-      .eg-card{
-        background:rgba(13,13,15,0.7);border:1px solid var(--line-strong);
-        border-radius:14px;backdrop-filter:blur(8px);
-      }
-      .eg-bubble-user{
-        background:linear-gradient(135deg,#1f3a66,#1a2f52);
-        border:1px solid rgba(91,155,255,0.25);
-      }
-      .eg-bubble-ai{
-        background:rgba(20,20,23,0.85);border:1px solid var(--line-strong);
-      }
-      .eg-input{
-        flex:1;background:rgba(14,14,16,0.8);border:1px solid var(--line-strong);
-        border-radius:10px;padding:13px 16px;color:var(--ink);font-family:var(--sans);
-        font-size:14px;outline:none;transition:border-color .2s;
-      }
-      .eg-input:focus{border-color:rgba(91,155,255,0.5)}
-      .eg-input::placeholder{color:var(--ink-faint)}
-      .eg-send{
-        font-family:var(--mono);font-size:12px;letter-spacing:0.04em;font-weight:500;
-        padding:0 22px;border-radius:10px;border:1px solid transparent;
-        background:var(--ink);color:#0a0a0a;cursor:pointer;transition:background .2s,transform .15s;
-      }
-      .eg-send:hover:not(:disabled){background:#fff;transform:translateY(-1px)}
-      .eg-send:disabled{background:#2a2a30;color:var(--ink-faint);cursor:not-allowed}
-
-      .eg-fb{
-        font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:6px;
-        cursor:pointer;border:1px solid var(--line-strong);background:transparent;
-        transition:background .15s,border-color .15s;
-      }
-      .eg-fb.ok{color:var(--concept)}
-      .eg-fb.ok:hover{background:rgba(78,201,163,0.12);border-color:rgba(78,201,163,0.4)}
-      .eg-fb.no{color:var(--contradiction)}
-      .eg-fb.no:hover{background:rgba(255,93,108,0.12);border-color:rgba(255,93,108,0.4)}
-
-      .eg-sw{width:8px;height:8px;border-radius:50%;display:inline-block;box-shadow:0 0 8px currentColor}
-
-      @keyframes egfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-      .eg-fade{animation:egfade .35s ease both}
-
-      /* streaming cursor */
-      @keyframes egcursor{0%,49%{opacity:1}50%,100%{opacity:0}}
-      .eg-cursor{
-        display:inline-block;width:7px;height:14px;background:var(--episode);
-        margin-left:2px;vertical-align:text-bottom;
-        animation:egcursor 1s steps(1) infinite;
-      }
-
-      .eg-auth-wrap{
-        min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
-        position:relative;overflow:hidden;
-      }
-      .eg-auth-card{position:relative;z-index:2;width:100%;max-width:420px;padding:36px 32px}
-      .eg-auth-title{
-        font-family:var(--sans);font-weight:500;font-size:44px;letter-spacing:-0.03em;
-        margin:8px 0 6px;color:var(--ink);
-      }
-      .eg-auth-sub{
-        font-family:var(--mono);font-size:12px;color:var(--ink-dim);letter-spacing:0.06em;
-        margin-bottom:26px;
-      }
       .eg-label{
-        font-family:var(--mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;
-        color:var(--ink-faint);display:block;margin:14px 0 6px;
-      }
-      .eg-toggle{text-align:center;margin-top:18px;font-family:var(--mono);font-size:12px;color:var(--ink-dim)}
-      .eg-toggle button{
-        background:none;border:none;color:var(--episode);cursor:pointer;font-family:var(--mono);
-        font-size:12px;padding:0;margin-left:4px;text-decoration:underline;
-      }
-      .eg-err{
-        margin-top:14px;padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:12px;
-        background:rgba(255,93,108,0.08);border:1px solid rgba(255,93,108,0.28);color:var(--contradiction);
+        font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:0.14em;
+        text-transform:uppercase;color:var(--n600);
       }
 
-      /* ── Trace panel ── */
-      .eg-trace-toggle{
-        width:100%;display:flex;align-items:center;justify-content:space-between;
-        background:none;border:none;cursor:pointer;padding:14px 4px;
-        font-family:var(--mono);font-size:11px;letter-spacing:0.16em;text-transform:uppercase;
-        color:var(--ink-faint);transition:color .2s;
+      /* wordmark: italic type in a right-pointing chevron block */
+      .eg-mark{position:relative;display:inline-flex;isolation:isolate;padding:0 4px 4px 0}
+      .eg-mark .shadow{
+        position:absolute;top:0;left:0;right:4px;bottom:4px;z-index:1;
+        transform:translate(3px,3px);background:#4a4132;
+        clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%);
       }
-      .eg-trace-toggle:hover{color:var(--ink-dim)}
-      .eg-trace-row{
-        display:flex;align-items:center;gap:14px;padding:9px 12px;cursor:pointer;
-        border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--ink-dim);
-        transition:background .15s;
+      .eg-mark .block{
+        position:relative;z-index:2;display:inline-flex;align-items:center;height:34px;
+        padding:0 18px;background:var(--ink);color:var(--surface);
+        clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%);
+        background-image:linear-gradient(160deg,rgba(255,255,255,0.14),rgba(255,255,255,0) 45%,rgba(0,0,0,0.12));
       }
-      .eg-trace-row:hover{background:rgba(255,255,255,0.03)}
-      .eg-trace-caret{color:var(--ink-faint);width:10px;flex-shrink:0}
-      .eg-trace-detail{padding:6px 12px 14px 34px;display:flex;flex-direction:column;gap:5px}
-      .eg-trace-agent{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px}
-      .eg-trace-agent .name{color:var(--ink-dim);width:150px;flex-shrink:0}
-      .eg-trace-bar{height:5px;border-radius:3px;min-width:2px;transition:width .3s ease}
-      .eg-trace-ms{color:var(--ink-faint);flex-shrink:0;font-size:10px}
+      .eg-mark .word{
+        font-family:var(--sans);font-weight:800;font-style:italic;font-size:18px;
+        letter-spacing:-0.035em;line-height:1;
+      }
+
+      .eg-nav{
+        display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+        padding:9px 18px;background:transparent;border:0;border-left:2px solid transparent;
+        font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:0.12em;
+        text-transform:uppercase;color:var(--n600);cursor:pointer;text-align:left;
+        transition:color 140ms ease,background 140ms ease;
+      }
+      .eg-nav:hover{color:var(--ink);background:var(--n200)}
+      .eg-nav:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+      .eg-nav[data-active="true"]{color:var(--ink);border-left-color:var(--ink);background:var(--n200)}
+      .eg-nav .badge{font-weight:400;color:var(--n500);letter-spacing:0.06em}
+
+      .eg-panel-title{
+        font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:0.16em;
+        text-transform:uppercase;color:var(--ink);
+      }
+
+      .eg-input{
+        flex:1;min-width:0;background:var(--surface);border:1px solid var(--n400);
+        padding:13px 15px;color:var(--ink);font-family:var(--sans);font-size:14px;
+        outline:none;transition:border-color 140ms ease;
+      }
+      .eg-input:focus{border-color:var(--ink)}
+      .eg-input::placeholder{color:var(--n500)}
+
+      .eg-send{
+        font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:0.14em;
+        text-transform:uppercase;padding:0 24px;border:1px solid var(--ink);
+        background:var(--ink);color:var(--surface);cursor:pointer;
+        transition:background 140ms ease,color 140ms ease;
+      }
+      .eg-send:hover:not(:disabled){background:transparent;color:var(--ink)}
+      .eg-send:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+      .eg-send:disabled{background:var(--n400);border-color:var(--n400);color:var(--surface);cursor:not-allowed}
+
+      .eg-ghost{
+        font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;
+        padding:4px 9px;background:transparent;border:1px solid var(--n400);color:var(--n700);
+        cursor:pointer;transition:border-color 140ms ease,color 140ms ease;
+      }
+      .eg-ghost:hover{border-color:var(--ink);color:var(--ink)}
+      .eg-ghost:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+      .eg-ghost[data-tone="warn"]:hover{border-color:var(--accent);color:var(--accent-700)}
+
+      .eg-link{
+        font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:0.12em;
+        text-transform:uppercase;background:none;border:0;padding:0;cursor:pointer;
+        color:var(--n700);text-decoration:underline;text-underline-offset:3px;
+      }
+      .eg-link:hover{color:var(--ink)}
+      .eg-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+      .eg-turn{padding:18px 26px;border-bottom:1px solid var(--n300)}
+      .eg-turn[data-weak="true"]{background:var(--n200)}
+      .eg-rule{width:2px;flex:none;background:var(--n400);align-self:stretch}
+      .eg-rule[data-weak="true"]{background:var(--accent)}
+
+      .eg-seg{display:inline-flex;gap:2px;align-items:center}
+      .eg-seg i{width:4px;height:11px;background:var(--n400);display:block}
+
+      .eg-claim{display:flex;align-items:center;gap:11px;padding:5px 0;font-size:13px}
+      .eg-tick{width:10px;height:10px;flex:none;background:var(--ink)}
+      .eg-tick[data-off="true"]{background:transparent;border:1.5px solid var(--accent)}
+
+      .eg-memrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 0}
+      .eg-memrow .acts{display:flex;gap:6px;opacity:0;transition:opacity 120ms ease}
+      .eg-memrow:hover .acts,.eg-memrow:focus-within .acts{opacity:1}
+
+      .eg-err{
+        margin-top:14px;padding:10px 12px;font-family:var(--mono);font-size:12px;
+        background:var(--accent-100);border:1px solid var(--accent);color:var(--accent-700);
+      }
+
+      .eg-tracebar{height:6px;min-width:2px;transition:width 240ms ease}
+
+      @keyframes egcaret{0%,49%{opacity:1}50%,100%{opacity:0}}
+      .eg-caret{
+        display:inline-block;width:7px;height:15px;background:var(--ink);
+        margin-left:3px;vertical-align:text-bottom;animation:egcaret 1s steps(1) infinite;
+      }
+      @media (prefers-reduced-motion:reduce){
+        .eg-caret{animation:none}
+        *{transition-duration:0ms !important}
+      }
     `}</style>
   )
 }
@@ -226,71 +203,79 @@ function AuthScreen({ onAuthed }) {
 
   const submit = async () => {
     setError('')
-    if (!email || !password) { setError('Enter email and password'); return }
+    if (!email || !password) { setError('Enter an email and password.'); return }
     if (mode === 'register' && password.length < 8) {
-      setError('Password must be at least 8 characters'); return
+      setError('Password needs at least 8 characters.'); return
     }
     setLoading(true)
     try {
+      let res
       if (mode === 'register') {
-        const res = await api.post('/auth/register', { email, password })
-        localStorage.setItem('engram_token', res.data.access_token)
-        localStorage.setItem('engram_email', res.data.email)
-        onAuthed(res.data.email)
+        res = await api.post('/auth/register', { email, password })
       } else {
         const body = new URLSearchParams()
         body.append('username', email)
         body.append('password', password)
-        const res = await api.post('/auth/login', body, {
+        res = await api.post('/auth/login', body, {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         })
-        localStorage.setItem('engram_token', res.data.access_token)
-        localStorage.setItem('engram_email', res.data.email)
-        onAuthed(res.data.email)
       }
+      localStorage.setItem('engram_token', res.data.access_token)
+      localStorage.setItem('engram_email', res.data.email)
+      onAuthed(res.data.email)
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Something went wrong'
-      setError(typeof msg === 'string' ? msg : 'Invalid request')
+      const msg = err.response?.data?.detail || 'Could not reach the server.'
+      setError(typeof msg === 'string' ? msg : 'That request was rejected.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="eg-auth-wrap">
-      <div className="eg-grid" />
-      <div className="eg-auth-card eg-fade">
-        <span className="eg-eyebrow">
-          <span className="seq">001</span><span className="sep">/</span><span>memory operating system</span>
-        </span>
-        <h1 className="eg-auth-title">Engram</h1>
-        <div className="eg-auth-sub">
-          {mode === 'login' ? 'Log in to your memory graph' : 'Create your memory graph'}
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
+      <div style={{ width: '100%', maxWidth: 380 }}>
+        <div style={{ display: 'grid', gap: 10, justifyItems: 'start', marginBottom: 30 }}>
+          <span className="eg-mark">
+            <span className="shadow" />
+            <span className="block"><span className="word">engram</span></span>
+          </span>
+          <span className="eg-label">Memory layer</span>
         </div>
 
-        <label className="eg-label">Email</label>
-        <input className="eg-input" type="email" value={email}
+        <h1 style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em' }}>
+          {mode === 'login' ? 'Open your graph' : 'Start a graph'}
+        </h1>
+        <p className="eg-mono" style={{ margin: '0 0 26px', fontSize: 12, color: 'var(--n600)' }}>
+          {mode === 'login'
+            ? 'Everything you told it is still there.'
+            : 'Nothing is stored until you say something.'}
+        </p>
+
+        <label className="eg-label" style={{ display: 'block', marginBottom: 6 }}>Email</label>
+        <input className="eg-input" style={{ width: '100%' }} type="email" value={email}
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="you@example.com" disabled={loading} />
 
-        <label className="eg-label">Password</label>
-        <input className="eg-input" type="password" value={password}
+        <label className="eg-label" style={{ display: 'block', margin: '16px 0 6px' }}>Password</label>
+        <input className="eg-input" style={{ width: '100%' }} type="password" value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder={mode === 'register' ? 'min. 8 characters' : '••••••••'}
+          placeholder={mode === 'register' ? 'at least 8 characters' : '••••••••'}
           disabled={loading} />
 
         {error && <div className="eg-err">{error}</div>}
 
-        <button className="eg-send" style={{ width: '100%', padding: '13px 0', marginTop: 20 }}
+        <button className="eg-send" style={{ width: '100%', padding: '14px 0', marginTop: 22 }}
           onClick={submit} disabled={loading}>
-          {loading ? '...' : mode === 'login' ? 'LOG IN' : 'CREATE ACCOUNT'}
+          {loading ? 'Working' : mode === 'login' ? 'Log in' : 'Create account'}
         </button>
 
-        <div className="eg-toggle">
-          {mode === 'login' ? "No account?" : 'Have an account?'}
-          <button onClick={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login') }}>
+        <div className="eg-mono" style={{ marginTop: 18, fontSize: 12, color: 'var(--n600)' }}>
+          {mode === 'login' ? 'No account yet?' : 'Already have one?'}
+          <button className="eg-link" style={{ marginLeft: 8 }}
+            onClick={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login') }}>
             {mode === 'login' ? 'Create one' : 'Log in'}
           </button>
         </div>
@@ -300,179 +285,67 @@ function AuthScreen({ onAuthed }) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Trace panel.
+   Memory graph.
+
+   Force layout runs until kinetic energy falls below a threshold,
+   then parks. Hover and selection repaint a single frame without
+   waking the physics, so nodes hold still while being aimed at.
    ────────────────────────────────────────────────────────────── */
-function TracePanel({ refreshTrigger }) {
-  const [open, setOpen] = useState(false)
-  const [traces, setTraces] = useState([])
-  const [expandedId, setExpandedId] = useState(null)
-  const [details, setDetails] = useState({})
-  const [loading, setLoading] = useState(false)
+const SLEEP_ENERGY = 0.012
+const SLEEP_FRAMES = 24
+const LABEL_LIMIT  = 40
 
-  const loadTraces = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await api.get('/traces?limit=10')
-      setTraces(res.data.traces || [])
-    } catch (err) {
-      console.error('Failed to load traces:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { if (open) loadTraces() }, [open, refreshTrigger, loadTraces])
-
-  const toggleDetail = async (traceId) => {
-    if (expandedId === traceId) { setExpandedId(null); return }
-    setExpandedId(traceId)
-    if (details[traceId]) return
-    try {
-      const res = await api.get(`/traces/${traceId}`)
-      setDetails(prev => ({ ...prev, [traceId]: res.data.events || [] }))
-    } catch (err) {
-      console.error('Failed to load trace detail:', err)
-    }
-  }
-
-  const timeAgo = (iso) => {
-    if (!iso) return ''
-    const secs = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000)
-    if (secs < 60) return `${secs}s ago`
-    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
-    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
-    return `${Math.floor(secs / 86400)}d ago`
-  }
-
-  const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`)
-
-  const latest = traces[0]
-
-  return (
-    <div style={{ marginTop: 18 }}>
-      <button className="eg-trace-toggle" onClick={() => setOpen(!open)}>
-        <span>{open ? '▾' : '▸'}  Agent traces</span>
-        <span style={{ color: 'var(--ink-faint)', textTransform: 'none', letterSpacing: 0 }}>
-          {latest ? `${fmtMs(latest.total_latency_ms)} last turn · ${latest.agent_count} agents` : ''}
-        </span>
-      </button>
-
-      {open && (
-        <div className="eg-card eg-fade" style={{ padding: 8 }}>
-          {loading && traces.length === 0 && (
-            <div className="eg-mono" style={{ padding: 20, textAlign: 'center',
-              color: 'var(--ink-faint)', fontSize: 12 }}>loading…</div>
-          )}
-
-          {!loading && traces.length === 0 && (
-            <div className="eg-mono" style={{ padding: 20, textAlign: 'center',
-              color: 'var(--ink-faint)', fontSize: 12 }}>
-              No traces yet. Send a message to generate one.
-            </div>
-          )}
-
-          {traces.map((t) => {
-            const events = details[t.trace_id] || []
-            const maxMs = Math.max(...events.map(e => e.latency_ms || 0), 1)
-            const isOpen = expandedId === t.trace_id
-
-            return (
-              <div key={t.trace_id}>
-                <div className="eg-trace-row" onClick={() => toggleDetail(t.trace_id)}>
-                  <span className="eg-trace-caret">{isOpen ? '▾' : '▸'}</span>
-                  <span style={{ width: 70, color: 'var(--ink-faint)' }}>{timeAgo(t.started_at)}</span>
-                  <span style={{ width: 60, color: 'var(--ink)' }}>{fmtMs(t.total_latency_ms)}</span>
-                  <span style={{ width: 100 }}>
-                    {(t.total_tokens_input + t.total_tokens_output).toLocaleString()} tok
-                  </span>
-                  <span style={{ width: 80 }}>{t.agent_count} agents</span>
-                  {t.error_count > 0 && (
-                    <span style={{ color: 'var(--contradiction)' }}>{t.error_count} errors</span>
-                  )}
-                </div>
-
-                {isOpen && (
-                  <div className="eg-trace-detail eg-fade">
-                    {events.length === 0 && (
-                      <span className="eg-mono" style={{ color: 'var(--ink-faint)', fontSize: 11 }}>
-                        loading…
-                      </span>
-                    )}
-                    {events.map((e, i) => (
-                      <div key={i} className="eg-trace-agent">
-                        <span className="name">{e.agent_name}</span>
-                        <span
-                          className="eg-trace-bar"
-                          style={{
-                            width: `${Math.max(2, ((e.latency_ms || 0) / maxMs) * 100)}%`,
-                            maxWidth: 340,
-                            background: e.status === 'error'
-                              ? 'var(--contradiction)'
-                              : (AGENT_COLOR[e.agent_name] || FALLBACK),
-                            boxShadow: `0 0 8px ${AGENT_COLOR[e.agent_name] || FALLBACK}44`,
-                          }}
-                        />
-                        <span className="eg-trace-ms">{fmtMs(e.latency_ms || 0)}</span>
-                        {(e.tokens_input > 0 || e.tokens_output > 0) && (
-                          <span className="eg-trace-ms">
-                            · {(e.tokens_input + e.tokens_output).toLocaleString()} tok
-                          </span>
-                        )}
-                        {e.status === 'error' && (
-                          <span className="eg-trace-ms" style={{ color: 'var(--contradiction)' }}>
-                            · error
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ──────────────────────────────────────────────────────────────
-   Hero graph.
-   ────────────────────────────────────────────────────────────── */
-function HeroGraph({ refreshTrigger }) {
+function MemoryGraphPanel({ refreshTrigger }) {
+  const hostRef = useRef(null)
   const canvasRef = useRef(null)
   const stateRef = useRef({ nodes: [], edges: [], adj: new Map() })
-  const mouseRef = useRef({ x: -9999, y: -9999, active: false })
-  const [counts, setCounts] = useState({ nodes: 0, edges: 0 })
+  const viewRef = useRef({ hover: -1, selected: -1, W: 0, H: 0 })
+  const loopRef = useRef({ raf: 0, still: 0, running: false })
+  const drawRef = useRef(() => {})
+  const wakeRef = useRef(() => {})
+  const [counts, setCounts] = useState({ nodes: 0, edges: 0, byType: {} })
 
   const loadGraph = useCallback(async () => {
     try {
-      const res = await api.get(`/memory/graph`)
-      const W = window.innerWidth, H = 520
+      const res = await api.get('/memory/graph')
+      const { W, H } = viewRef.current
+      const w = W || 700, h = H || 520
       const idMap = new Map()
+      const byType = {}
+
       const nodes = res.data.nodes.map((n, i) => {
-        const node = {
-          id: n.id, idx: i,
-          type: n.type,
-          label: (n.label || n.type || '').toString().slice(0, 42),
-          color: TYPE_COLOR[n.type] || FALLBACK,
-          x: W * 0.5 + (Math.random() - 0.5) * W * 0.6,
-          y: H * 0.5 + (Math.random() - 0.5) * H * 0.7,
-          vx: 0, vy: 0,
-          baseR: 3 + (n.type === 'Contradiction' ? 1.4 : 0) + Math.random() * 1.6,
-          pulse: 0, wakePhase: Math.random() * Math.PI * 2,
-        }
+        const type = n.type
+        byType[type] = (byType[type] || 0) + 1
+        // area encodes strength, so radius scales with the square root
+        const strength = typeof n.confidence === 'number' ? n.confidence : 0.6
         idMap.set(n.id, i)
-        return node
+        return {
+          id: n.id, idx: i, type,
+          label: (n.label || type || '').toString().slice(0, 34).toUpperCase(),
+          r: 7 + Math.sqrt(Math.max(0.05, strength)) * 11 + (type === 'Contradiction' ? 3 : 0),
+          x: w * 0.5 + (Math.random() - 0.5) * w * 0.6,
+          y: h * 0.5 + (Math.random() - 0.5) * h * 0.7,
+          vx: 0, vy: 0,
+        }
       })
+
       const edges = res.data.edges
         .filter(e => idMap.has(e.source) && idMap.has(e.target))
-        .map(e => ({ a: idMap.get(e.source), b: idMap.get(e.target), pulse: 0 }))
+        .map(e => {
+          const a = idMap.get(e.source), b = idMap.get(e.target)
+          const conflict = nodes[a].type === 'Contradiction' || nodes[b].type === 'Contradiction'
+          return { a, b, conflict, rel: e.relationship }
+        })
+
       const adj = new Map()
       nodes.forEach(n => adj.set(n.idx, []))
-      edges.forEach(e => { adj.get(e.a).push({ nbr: e.b, edge: e }); adj.get(e.b).push({ nbr: e.a, edge: e }) })
+      edges.forEach(e => { adj.get(e.a).push(e.b); adj.get(e.b).push(e.a) })
+
       stateRef.current = { nodes, edges, adj }
-      setCounts({ nodes: nodes.length, edges: edges.length })
+      viewRef.current.hover = -1
+      viewRef.current.selected = -1
+      setCounts({ nodes: nodes.length, edges: edges.length, byType })
+      wakeRef.current()
     } catch (err) {
       console.error('Failed to load graph:', err)
     }
@@ -482,85 +355,38 @@ function HeroGraph({ refreshTrigger }) {
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    const host = hostRef.current
+    if (!canvas || !host) return
     const ctx = canvas.getContext('2d')
     const DPR = Math.min(window.devicePixelRatio || 1, 2)
-    let W = 0, H = 0, raf = 0
 
     const resize = () => {
-      W = canvas.parentElement.clientWidth
-      H = 520
+      const W = host.clientWidth, H = host.clientHeight
+      viewRef.current.W = W; viewRef.current.H = H
       canvas.width = W * DPR; canvas.height = H * DPR
       canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
-    }
-    resize()
-    window.addEventListener('resize', resize)
-
-    const rectMouse = (e) => {
-      const r = canvas.getBoundingClientRect()
-      mouseRef.current.x = e.clientX - r.left
-      mouseRef.current.y = e.clientY - r.top
-      mouseRef.current.active = true
-    }
-    const leave = () => { mouseRef.current.active = false; mouseRef.current.x = -9999 }
-    canvas.addEventListener('mousemove', rectMouse)
-    canvas.addEventListener('mouseleave', leave)
-
-    const click = (e) => {
-      const r = canvas.getBoundingClientRect()
-      const mx = e.clientX - r.left, my = e.clientY - r.top
-      const { nodes, adj } = stateRef.current
-      let best = null, bd = Infinity
-      for (const n of nodes) {
-        const dx = n.x - mx, dy = n.y - my, d = dx * dx + dy * dy
-        if (d < bd) { bd = d; best = n }
-      }
-      if (!best || bd > 90 * 90) return
-      const visited = new Set([best.idx]); best.pulse = 1
-      const queue = [{ i: best.idx, d: 0 }]
-      while (queue.length) {
-        const { i, d } = queue.shift()
-        if (d > 4) continue
-        for (const { nbr, edge } of (adj.get(i) || [])) {
-          if (visited.has(nbr)) continue
-          visited.add(nbr)
-          const nd = nodes[nbr]
-          setTimeout(() => { nd.pulse = 1; edge.pulse = 1 }, (d + 1) * 95)
-          queue.push({ i: nbr, d: d + 1 })
-        }
-      }
-    }
-    canvas.addEventListener('click', click)
-
-    const hexA = (hex, a) => {
-      const h = hex.replace('#', '')
-      const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
-      return `rgba(${r},${g},${b},${a})`
+      wake()
     }
 
-    let last = performance.now()
-    let lastAuto = 0
-    const frame = (t) => {
-      const dt = Math.min(40, t - last); last = t
-      const { nodes, edges, adj } = stateRef.current
-      const m = mouseRef.current
+    const step = () => {
+      const { nodes, edges } = stateRef.current
+      const { W, H } = viewRef.current
       const cx = W / 2, cy = H / 2
+      let energy = 0
 
       for (const n of nodes) {
-        n.vx += (cx - n.x) * 0.0009
-        n.vy += (cy - n.y) * 0.0009
-        n.wakePhase += dt * 0.001
-        n.vx += Math.cos(n.wakePhase) * 0.006
-        n.vy += Math.sin(n.wakePhase * 0.8 + 1.3) * 0.006
+        n.vx += (cx - n.x) * 0.0011
+        n.vy += (cy - n.y) * 0.0011
       }
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i], b = nodes[j]
           const dx = a.x - b.x, dy = a.y - b.y
+          const min = a.r + b.r + 46
           const d2 = dx * dx + dy * dy
-          if (d2 < 70 * 70 && d2 > 0.01) {
-            const d = Math.sqrt(d2), f = 0.55 * (1 - d / 70) / d
+          if (d2 < min * min && d2 > 0.01) {
+            const d = Math.sqrt(d2), f = 0.7 * (1 - d / min) / d
             a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f
           }
         }
@@ -568,171 +394,599 @@ function HeroGraph({ refreshTrigger }) {
       for (const e of edges) {
         const a = nodes[e.a], b = nodes[e.b]
         const dx = b.x - a.x, dy = b.y - a.y
-        const d = Math.sqrt(dx * dx + dy * dy) || 0.001
-        const f = (d - 110) * 0.0025
+        const d = Math.hypot(dx, dy) || 0.001
+        const f = (d - 130) * 0.0026
         a.vx += (dx / d) * f; a.vy += (dy / d) * f
         b.vx -= (dx / d) * f; b.vy -= (dy / d) * f
       }
-      if (m.active) {
-        for (const n of nodes) {
-          const dx = m.x - n.x, dy = m.y - n.y, d2 = dx * dx + dy * dy
-          if (d2 < 220 * 220) {
-            const d = Math.sqrt(d2) || 0.001
-            if (d < 50) { const f = -0.6 * (1 - d / 50) / d; n.vx += dx * f; n.vy += dy * f }
-            else { const f = 0.018 * (1 - d / 220) / d; n.vx += dx * f; n.vy += dy * f }
-          }
-        }
-      }
       for (const n of nodes) {
-        n.vx *= 0.86; n.vy *= 0.86
+        n.vx *= 0.84; n.vy *= 0.84
         const sp = Math.hypot(n.vx, n.vy)
         if (sp > 2.5) { n.vx = n.vx / sp * 2.5; n.vy = n.vy / sp * 2.5 }
         n.x += n.vx; n.y += n.vy
-        const pad = 30
-        if (n.x < pad) { n.x = pad; n.vx *= -0.5 }
-        else if (n.x > W - pad) { n.x = W - pad; n.vx *= -0.5 }
-        if (n.y < pad) { n.y = pad; n.vy *= -0.5 }
-        else if (n.y > H - pad) { n.y = H - pad; n.vy *= -0.5 }
-        n.pulse *= 0.95
+        const pad = n.r + 30
+        if (n.x < pad) { n.x = pad; n.vx *= -0.4 }
+        else if (n.x > W - pad) { n.x = W - pad; n.vx *= -0.4 }
+        if (n.y < pad) { n.y = pad; n.vy *= -0.4 }
+        else if (n.y > H - pad) { n.y = H - pad; n.vy *= -0.4 }
+        energy += n.vx * n.vx + n.vy * n.vy
       }
-      for (const e of edges) e.pulse *= 0.94
+      return nodes.length ? energy / nodes.length : 0
+    }
 
-      if (t - lastAuto > 2400 + Math.random() * 1800 && nodes.length) {
-        lastAuto = t
-        const seed = nodes[Math.floor(Math.random() * nodes.length)]
-        seed.pulse = Math.max(seed.pulse, 0.8)
-        const nb = (adj.get(seed.idx) || []).slice(0, 3)
-        nb.forEach(({ nbr, edge }, i) => setTimeout(() => { nodes[nbr].pulse = 0.85; edge.pulse = 1 }, 110 + i * 70))
-      }
-
+    const draw = () => {
+      const { nodes, edges, adj } = stateRef.current
+      const { W, H, hover, selected } = viewRef.current
       ctx.clearRect(0, 0, W, H)
+
+      const focus = selected >= 0 ? selected : hover
+      const near = focus >= 0 ? new Set([focus, ...(adj.get(focus) || [])]) : null
+      const dim = (i) => (near && !near.has(i) ? 0.22 : 1)
+
       for (const e of edges) {
         const a = nodes[e.a], b = nodes[e.b]
-        const d = Math.hypot(b.x - a.x, b.y - a.y)
-        const lenA = Math.max(0, 1 - (d - 100) / 280)
-        const baseA = Math.min(0.08 + 0.16 * lenA + 0.5 * e.pulse, 0.7)
-        const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y)
-        grad.addColorStop(0, hexA(a.color, baseA))
-        grad.addColorStop(1, hexA(b.color, baseA))
-        ctx.strokeStyle = grad
-        ctx.lineWidth = 0.6 + 1.6 * e.pulse
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
-      }
-      for (const n of nodes) {
-        const breathe = 0.85 + 0.15 * Math.sin(n.wakePhase * 1.4)
-        const r = n.baseR * (1 + 0.5 * n.pulse) * breathe
-        const glowR = r * 6
-        const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowR)
-        g.addColorStop(0, hexA(n.color, 0.35 * (0.55 + n.pulse * 0.9)))
-        g.addColorStop(0.4, hexA(n.color, 0.08))
-        g.addColorStop(1, hexA(n.color, 0))
-        ctx.fillStyle = g
-        ctx.beginPath(); ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2); ctx.fill()
-        ctx.fillStyle = hexA(n.color, 0.95)
-        ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, Math.PI * 2); ctx.fill()
-        ctx.fillStyle = 'rgba(255,255,255,0.9)'
-        ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(0.6, r * 0.35), 0, Math.PI * 2); ctx.fill()
-        if (n.pulse > 0.05) {
-          ctx.strokeStyle = hexA(n.color, 0.6 * n.pulse)
-          ctx.lineWidth = 1
-          ctx.beginPath(); ctx.arc(n.x, n.y, r + 5 + 12 * n.pulse, 0, Math.PI * 2); ctx.stroke()
+        const alpha = Math.min(dim(e.a), dim(e.b))
+        ctx.save()
+        ctx.globalAlpha = alpha
+        if (e.conflict) {
+          ctx.strokeStyle = '#f01f0a'
+          ctx.lineWidth = 1.6
+          ctx.setLineDash([7, 6])
+        } else {
+          ctx.strokeStyle = '#c7b593'
+          ctx.lineWidth = 1.4
         }
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+        ctx.restore()
       }
-      raf = requestAnimationFrame(frame)
+
+      const showLabels = nodes.length <= LABEL_LIMIT
+      for (const n of nodes) {
+        const c = NODE[n.type] || FALLBACK
+        const isFocus = focus === n.idx
+        ctx.save()
+        ctx.globalAlpha = dim(n.idx)
+
+        ctx.fillStyle = c.ring
+        ctx.globalAlpha = dim(n.idx) * 0.5
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 7, 0, Math.PI * 2); ctx.fill()
+
+        ctx.globalAlpha = dim(n.idx)
+        ctx.fillStyle = c.fill
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill()
+
+        if (n.type === 'Entity' || n.type === 'Source') {
+          ctx.strokeStyle = c.ring === '#d5c5a4' ? '#8d8471' : c.ring
+          ctx.lineWidth = 4
+          ctx.beginPath(); ctx.arc(n.x, n.y, n.r - 2, 0, Math.PI * 2); ctx.stroke()
+        }
+        if (isFocus) {
+          ctx.strokeStyle = '#191715'
+          ctx.lineWidth = 1.5
+          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 11, 0, Math.PI * 2); ctx.stroke()
+        }
+
+        if (showLabels || isFocus) {
+          ctx.font = '700 9.5px "JetBrains Mono", monospace'
+          ctx.fillStyle = c.label
+          ctx.textBaseline = 'middle'
+          ctx.fillText(n.label, n.x + n.r + 11, n.y)
+        }
+        ctx.restore()
+      }
     }
-    raf = requestAnimationFrame(frame)
+    drawRef.current = draw
+
+    const frame = () => {
+      const energy = step()
+      draw()
+      const l = loopRef.current
+      l.still = energy < SLEEP_ENERGY ? l.still + 1 : 0
+      if (l.still >= SLEEP_FRAMES) { l.running = false; return }
+      l.raf = requestAnimationFrame(frame)
+    }
+
+    const wake = () => {
+      const l = loopRef.current
+      l.still = 0
+      if (l.running) return
+      l.running = true
+      l.raf = requestAnimationFrame(frame)
+    }
+    wakeRef.current = wake
+
+    const pick = (evt) => {
+      const r = canvas.getBoundingClientRect()
+      const mx = evt.clientX - r.left, my = evt.clientY - r.top
+      const { nodes } = stateRef.current
+      let best = -1, bd = Infinity
+      for (const n of nodes) {
+        const d = (n.x - mx) ** 2 + (n.y - my) ** 2
+        if (d < bd && d < (n.r + 16) ** 2) { bd = d; best = n.idx }
+      }
+      return best
+    }
+
+    // Repaint only — never wake the simulation, or the target moves.
+    const onMove = (e) => {
+      const hit = pick(e)
+      if (hit === viewRef.current.hover) return
+      viewRef.current.hover = hit
+      canvas.style.cursor = hit >= 0 ? 'pointer' : 'default'
+      draw()
+    }
+    const onLeave = () => { viewRef.current.hover = -1; draw() }
+    const onClick = (e) => {
+      const hit = pick(e)
+      viewRef.current.selected = hit === viewRef.current.selected ? -1 : hit
+      draw()
+    }
+
+    const ro = new ResizeObserver(resize)
+    ro.observe(host)
+    resize()
+    canvas.addEventListener('mousemove', onMove)
+    canvas.addEventListener('mouseleave', onLeave)
+    canvas.addEventListener('click', onClick)
 
     return () => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('resize', resize)
-      canvas.removeEventListener('mousemove', rectMouse)
-      canvas.removeEventListener('mouseleave', leave)
-      canvas.removeEventListener('click', click)
+      cancelAnimationFrame(loopRef.current.raf)
+      loopRef.current.running = false
+      ro.disconnect()
+      canvas.removeEventListener('mousemove', onMove)
+      canvas.removeEventListener('mouseleave', onLeave)
+      canvas.removeEventListener('click', onClick)
     }
   }, [])
 
+  const legend = [
+    ['Episode', 'Episode'], ['Entity', 'Entity'], ['Contradiction', 'Contradiction'],
+    ['Concept', 'Concept'], ['Source', 'Source'],
+  ]
+
   return (
-    <section style={{ position: 'relative', height: 520, overflow: 'hidden', borderBottom: '1px solid var(--line-strong)' }}>
-      <div className="eg-grid" />
-      <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, display: 'block' }} />
-
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex',
-        justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', zIndex: 5, pointerEvents: 'none' }}>
-        <div className="eg-mono" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-dim)' }}>
-          <span style={{ width: 13, height: 13, borderRadius: 3,
-            background: 'radial-gradient(circle at 30% 30%, #ededed 0 22%, transparent 23%), linear-gradient(135deg,#1a1a1d,#2a2a30)',
-            boxShadow: '0 0 0 1px rgba(255,255,255,0.08), 0 0 18px rgba(91,155,255,0.18)' }} />
-          <span style={{ color: 'var(--ink)', fontWeight: 500, letterSpacing: '0.04em' }}>engram</span>
-          <span style={{ color: 'var(--ink-faint)' }}>/ memory os</span>
-        </div>
-        <span className="eg-pill" style={{ pointerEvents: 'auto' }}><span className="dot" /> live · neo4j</span>
-      </div>
-
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', textAlign: 'center', zIndex: 4, pointerEvents: 'none', padding: '0 24px' }}>
-        <span className="eg-eyebrow" style={{ pointerEvents: 'auto' }}>
-          <span className="seq">001</span><span className="sep">/</span><span>memory operating system</span>
+    <section style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
+      background: 'var(--bg)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 22px 14px 34px', flex: 'none' }}>
+        <span className="eg-panel-title">Memory graph</span>
+        <span className="eg-mono" style={{ fontSize: 10.5, letterSpacing: '0.1em',
+          textTransform: 'uppercase', color: 'var(--n600)' }}>
+          {counts.nodes} nodes · {counts.edges} edges
         </span>
-        <h1 className="eg-title">Engram<span className="blink" /></h1>
-        <p className="eg-tagline">
-          A multi-agent <em>memory operating system</em>. Specialized agents read, write,
-          and reconcile memories across a live knowledge graph — talk to it below.
-        </p>
       </div>
 
-      <div className="eg-mono" style={{ position: 'absolute', left: 28, bottom: 22, zIndex: 5,
-        display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11, color: 'var(--ink-dim)' }}>
-        <span style={{ color: 'var(--ink-faint)', letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 2 }}>Node types</span>
-        {Object.entries(TYPE_COLOR).map(([t, c]) => (
-          <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span className="eg-sw" style={{ color: c, background: c }} />{t}
-          </span>
-        ))}
+      {/* 34px of left padding keeps the panel off the sidebar edge */}
+      <div style={{ flex: 1, minHeight: 0, padding: '0 22px 0 34px' }}>
+        <div ref={hostRef} style={{ position: 'relative', width: '100%', height: '100%',
+          overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
+            backgroundImage:
+              'linear-gradient(to right, var(--grid) 1px, transparent 1px),' +
+              'linear-gradient(to bottom, var(--grid) 1px, transparent 1px)',
+            backgroundSize: '58px 58px',
+            WebkitMaskImage: 'radial-gradient(ellipse 78% 78% at 50% 50%, #000 55%, transparent 100%)',
+            maskImage: 'radial-gradient(ellipse 78% 78% at 50% 50%, #000 55%, transparent 100%)' }} />
+          <Brackets />
+          <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, display: 'block' }} />
+        </div>
       </div>
-      <div className="eg-mono" style={{ position: 'absolute', right: 28, bottom: 22, zIndex: 5,
-        display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: 'var(--ink-dim)',
-        textAlign: 'right', alignItems: 'flex-end' }}>
-        <span><span style={{ color: 'var(--ink-faint)' }}>nodes </span><span style={{ color: 'var(--ink)' }}>{counts.nodes}</span></span>
-        <span><span style={{ color: 'var(--ink-faint)' }}>edges </span><span style={{ color: 'var(--ink)' }}>{counts.edges}</span></span>
-        <span style={{ color: 'var(--ink-faint)' }}>move · click to explore</span>
+
+      <div style={{ padding: '16px 22px 18px 34px', flex: 'none', display: 'grid', gap: 12 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', alignItems: 'baseline' }}>
+          <span className="eg-label" style={{ color: 'var(--ink)' }}>How to read</span>
+          <span className="eg-mono" style={{ fontSize: 10, letterSpacing: '0.08em',
+            textTransform: 'uppercase', color: 'var(--n600)' }}>
+            Area = strength · red = contradiction · click a node to isolate it
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
+          gap: '5px 20px' }}>
+          {legend.map(([type, name]) => {
+            const c = NODE[type]
+            return (
+              <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 9,
+                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.08em',
+                textTransform: 'uppercase', color: 'var(--n700)' }}>
+                <span style={{ width: 11, height: 11, flex: 'none', borderRadius: '50%',
+                  background: c.fill,
+                  border: type === 'Entity' || type === 'Source' ? `3px solid ${c.ring}` : 'none' }} />
+                <span style={{ color: type === 'Contradiction' ? 'var(--accent-700)' : 'inherit' }}>
+                  {name}
+                </span>
+                <span style={{ marginLeft: 'auto', color: 'var(--n500)' }}>
+                  {counts.byType[type] || 0}
+                </span>
+              </span>
+            )
+          })}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function Brackets() {
+  const arm = 16, off = 8
+  const base = { position: 'absolute', width: arm, height: arm, borderColor: 'var(--bracket)',
+    borderStyle: 'solid', pointerEvents: 'none' }
+  return (
+    <>
+      <span style={{ ...base, top: off, left: off, borderWidth: '2px 0 0 2px' }} />
+      <span style={{ ...base, top: off, right: off, borderWidth: '2px 2px 0 0' }} />
+      <span style={{ ...base, bottom: off, left: off, borderWidth: '0 0 2px 2px' }} />
+      <span style={{ ...base, bottom: off, right: off, borderWidth: '0 2px 2px 0' }} />
+    </>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Grounding block. Collapsed by default; a weak score opens itself.
+   ────────────────────────────────────────────────────────────── */
+const SEGMENTS = 22
+const WEAK = 0.5
+
+function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
+  const score = grounding.grounding_score ?? 0
+  const weak = score < WEAK
+  const [open, setOpen] = useState(weak)
+
+  const cited = grounding.citations || []
+  const missing = grounding.ungrounded_claims || []
+  const mems = memories || []
+  const total = cited.length + missing.length
+  const filled = Math.round(score * SEGMENTS)
+  const tone = weak ? 'var(--accent)' : 'var(--ink)'
+
+  const summary = weak
+    ? `needs review · ${cited.length}/${total || 1} verified · ${mems.length} memories`
+    : `${cited.length}/${total || 1} verified · ${mems.length} memories`
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <span className="eg-mono" style={{ fontSize: 19, fontWeight: 700, color: tone,
+          letterSpacing: '-0.01em' }}>
+          {(score * 100).toFixed(0)}%
+        </span>
+        <span className="eg-label">Grounded</span>
+        <span className="eg-seg" aria-hidden="true">
+          {Array.from({ length: SEGMENTS }, (_, i) => (
+            <i key={i} style={i < filled ? { background: tone } : undefined} />
+          ))}
+        </span>
+        <span className="eg-mono" style={{ fontSize: 11.5, color: 'var(--n700)' }}>{summary}</span>
+        {total > 0 && (
+          <button className="eg-link" style={{ marginLeft: 'auto' }}
+            onClick={() => setOpen(!open)} aria-expanded={open}>
+            {open ? 'Hide evidence' : 'Evidence'}
+          </button>
+        )}
+      </div>
+
+      {open && total > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="eg-label" style={{ marginBottom: 6 }}>Claims checked</div>
+          {cited.map((c, i) => (
+            <div key={`c${i}`} className="eg-claim">
+              <span className="eg-tick" />
+              <span style={{ flex: 1, minWidth: 0, color: 'var(--ink-dim)' }}>{c.claim}</span>
+              <span className="eg-mono" style={{ fontSize: 12, color: 'var(--ink)' }}>
+                {c.trust_score != null ? c.trust_score.toFixed(2) : '—'}
+              </span>
+            </div>
+          ))}
+          {missing.map((c, i) => (
+            <div key={`u${i}`} className="eg-claim">
+              <span className="eg-tick" data-off="true" />
+              <span style={{ flex: 1, minWidth: 0, color: 'var(--ink-dim)' }}>{c}</span>
+              <span className="eg-mono" style={{ fontSize: 12, color: 'var(--accent)' }}>—</span>
+            </div>
+          ))}
+
+          {mems.length > 0 ? (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--n300)' }}>
+              <div className="eg-label" style={{ marginBottom: 6 }}>Memories used</div>
+              {mems.map((m, i) => (
+                <div key={i} className="eg-memrow">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0,
+                    fontSize: 13, color: 'var(--ink-dim)' }}>
+                    <span style={{ width: 9, height: 9, flex: 'none', borderRadius: '50%',
+                      background: (NODE[m.type] || FALLBACK).fill }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap' }}>{m.text}</span>
+                    <span className="eg-mono" style={{ fontSize: 11, color: 'var(--n500)' }}>
+                      {(m.similarity * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                  <span className="acts">
+                    <button className="eg-ghost" onClick={() => onFeedback(m.id, 'correct')}>
+                      Confirm
+                    </button>
+                    <button className="eg-ghost" data-tone="warn"
+                      onClick={() => onFeedback(m.id, 'incorrect')}>
+                      Dispute
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="eg-label" style={{ marginTop: 14, color: 'var(--accent-700)' }}>
+              No memory retrieved
+            </div>
+          )}
+
+          {contradictions?.length > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid var(--accent)` }}>
+              <div className="eg-label" style={{ color: 'var(--accent-700)', marginBottom: 6 }}>
+                Conflicts held
+              </div>
+              {contradictions.map((c, i) => (
+                <div key={i} style={{ fontSize: 13, color: 'var(--ink-dim)', padding: '3px 0' }}>
+                  {c.existing_fact} <span style={{ color: 'var(--accent)' }}>vs</span> {c.new_fact}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Transcript.
+   ────────────────────────────────────────────────────────────── */
+function Transcript({ messages, stageLabel, input, setInput, send, loading, onFeedback, meanScore, turns }) {
+  const scrollRef = useRef(null)
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [messages, loading])
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
+      background: 'var(--surface)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 26px', flex: 'none', borderBottom: '1px solid var(--n300)' }}>
+        <span className="eg-panel-title">Transcript</span>
+        <span className="eg-mono" style={{ fontSize: 10.5, letterSpacing: '0.1em',
+          textTransform: 'uppercase', color: 'var(--n600)' }}>
+          {turns} turns{meanScore != null && ` · mean grounding ${(meanScore * 100).toFixed(0)}%`}
+        </span>
+      </div>
+
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {messages.length === 0 && (
+          <div style={{ padding: '90px 34px', maxWidth: 460 }}>
+            <div className="eg-label" style={{ marginBottom: 10 }}>Nothing stored yet</div>
+            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--ink-dim)' }}>
+              Say something and it gets recorded, not answered from. The first few turns
+              build the graph; grounding starts once there's something to ground against.
+            </p>
+          </div>
+        )}
+
+        {messages.map((msg, i) => {
+          if (msg.role === 'assistant' && msg.content === '' && msg.streaming) return null
+          const weak = msg.grounding ? msg.grounding.grounding_score < WEAK : false
+
+          return (
+            <article key={i} className="eg-turn" data-weak={weak}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 11, marginBottom: 9 }}>
+                <span className="eg-label" style={{ color: 'var(--ink)' }}>
+                  {msg.role === 'user' ? 'You' : 'Engram'}
+                </span>
+                <span className="eg-mono" style={{ fontSize: 10.5, color: 'var(--n500)' }}>
+                  {msg.mid}
+                </span>
+                <span className="eg-mono" style={{ marginLeft: 'auto', fontSize: 10.5,
+                  color: 'var(--n500)' }}>{msg.at}</span>
+              </div>
+
+              <div style={{ display: 'flex', gap: 15 }}>
+                <span className="eg-rule" data-weak={weak} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 15, lineHeight: 1.55 }}>
+                    {msg.content}
+                    {msg.streaming && <span className="eg-caret" />}
+                  </div>
+                  {msg.grounding && (
+                    <GroundingBlock
+                      grounding={msg.grounding}
+                      memories={msg.memories}
+                      contradictions={msg.contradictions}
+                      onFeedback={onFeedback}
+                    />
+                  )}
+                </div>
+              </div>
+            </article>
+          )
+        })}
+
+        {stageLabel && (
+          <div className="eg-turn">
+            <span className="eg-label">Engram</span>
+            <div className="eg-mono" style={{ marginTop: 8, fontSize: 13, color: 'var(--n600)' }}>
+              {stageLabel}…
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ flex: 'none', display: 'flex', gap: 10, padding: '16px 26px',
+        borderTop: '1px solid var(--n300)' }}>
+        <input
+          className="eg-input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && send()}
+          placeholder="Say something — every claim in the reply gets checked"
+          disabled={loading}
+        />
+        <button className="eg-send" onClick={send} disabled={loading}>Send</button>
       </div>
     </section>
   )
 }
 
 /* ──────────────────────────────────────────────────────────────
-   Main authenticated app.
+   Agent trace.
+   ────────────────────────────────────────────────────────────── */
+const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`)
+
+function TraceScreen({ refreshTrigger }) {
+  const [traces, setTraces] = useState([])
+  const [expandedId, setExpandedId] = useState(null)
+  const [details, setDetails] = useState({})
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.get('/traces?limit=25')
+      .then(res => { if (alive) setTraces(res.data.traces || []) })
+      .catch(err => console.error('Failed to load traces:', err))
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [refreshTrigger])
+
+  const toggle = async (id) => {
+    if (expandedId === id) { setExpandedId(null); return }
+    setExpandedId(id)
+    if (details[id]) return
+    try {
+      const res = await api.get(`/traces/${id}`)
+      setDetails(prev => ({ ...prev, [id]: res.data.events || [] }))
+    } catch (err) {
+      console.error('Failed to load trace detail:', err)
+    }
+  }
+
+  const timeAgo = (iso) => {
+    if (!iso) return ''
+    const s = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000)
+    if (s < 60) return `${s}s ago`
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+    return `${Math.floor(s / 86400)}d ago`
+  }
+
+  return (
+    <div style={{ overflowY: 'auto', padding: '26px 34px' }}>
+      {loading && <div className="eg-label">Loading</div>}
+      {!loading && traces.length === 0 && (
+        <div style={{ maxWidth: 420 }}>
+          <div className="eg-label" style={{ marginBottom: 10 }}>No traces</div>
+          <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--ink-dim)' }}>
+            Every turn writes a trace of which agents ran and how long each took.
+            Send a message to make one.
+          </p>
+        </div>
+      )}
+
+      {traces.map((t) => {
+        const events = details[t.trace_id] || []
+        const maxMs = Math.max(...events.map(e => e.latency_ms || 0), 1)
+        const open = expandedId === t.trace_id
+        return (
+          <div key={t.trace_id} style={{ borderBottom: '1px solid var(--n300)' }}>
+            <button onClick={() => toggle(t.trace_id)}
+              style={{ display: 'flex', alignItems: 'center', gap: 22, width: '100%',
+                padding: '13px 4px', background: 'none', border: 0, cursor: 'pointer',
+                fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-dim)', textAlign: 'left' }}>
+              <span style={{ width: 10, color: 'var(--n500)' }}>{open ? '−' : '+'}</span>
+              <span style={{ width: 80, color: 'var(--n600)' }}>{timeAgo(t.started_at)}</span>
+              <span style={{ width: 70, color: 'var(--ink)', fontWeight: 500 }}>
+                {fmtMs(t.total_latency_ms)}
+              </span>
+              <span style={{ width: 110 }}>
+                {(t.total_tokens_input + t.total_tokens_output).toLocaleString()} tok
+              </span>
+              <span style={{ width: 90 }}>{t.agent_count} agents</span>
+              {t.error_count > 0 && (
+                <span style={{ color: 'var(--accent-700)' }}>{t.error_count} errors</span>
+              )}
+            </button>
+
+            {open && (
+              <div style={{ padding: '4px 4px 18px 46px', display: 'grid', gap: 7 }}>
+                {events.length === 0 && <span className="eg-label">Loading</span>}
+                {events.map((e, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12,
+                    fontFamily: 'var(--mono)', fontSize: 11 }}>
+                    <span style={{ width: 160, flex: 'none', color: 'var(--ink-dim)' }}>
+                      {e.agent_name}
+                    </span>
+                    <span className="eg-tracebar" style={{
+                      width: `${Math.max(2, ((e.latency_ms || 0) / maxMs) * 100)}%`,
+                      maxWidth: 320,
+                      background: e.status === 'error'
+                        ? 'var(--accent)'
+                        : (AGENT_COLOR[e.agent_name] || '#8d8471'),
+                    }} />
+                    <span style={{ color: 'var(--n600)', fontSize: 10 }}>
+                      {fmtMs(e.latency_ms || 0)}
+                    </span>
+                    {(e.tokens_input > 0 || e.tokens_output > 0) && (
+                      <span style={{ color: 'var(--n500)', fontSize: 10 }}>
+                        · {(e.tokens_input + e.tokens_output).toLocaleString()} tok
+                      </span>
+                    )}
+                    {e.status === 'error' && (
+                      <span style={{ color: 'var(--accent-700)', fontSize: 10 }}>· error</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* Placeholder until the endpoints exist. Says what's missing rather than faking a table. */
+function PendingScreen({ title, body, endpoint }) {
+  return (
+    <div style={{ padding: '26px 34px', maxWidth: 460 }}>
+      <div className="eg-label" style={{ marginBottom: 10 }}>{title}</div>
+      <p style={{ margin: '0 0 14px', fontSize: 15, lineHeight: 1.55, color: 'var(--ink-dim)' }}>
+        {body}
+      </p>
+      <span className="eg-mono" style={{ fontSize: 11.5, color: 'var(--n600)' }}>
+        Waiting on {endpoint}
+      </span>
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Shell.
    ────────────────────────────────────────────────────────────── */
 function AppInner({ email, onLogout }) {
+  const [view, setView] = useState('chat')
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [graphRefresh, setGraphRefresh] = useState(0)
-  const scrollRef = useRef(null)
+  const sessionId = useMemo(
+    () => '0x' + Math.random().toString(16).slice(2, 6).toUpperCase(), []
+  )
 
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [messages, loading])
-
-  /**
-   * Streams the response over SSE.
-   *
-   * Uses fetch() rather than the browser's EventSource because EventSource
-   * can't set an Authorization header. We read the ReadableStream manually
-   * and parse SSE frames ourselves.
-   */
   const sendMessage = async () => {
     if (!input.trim() || loading) return
     const userMessage = input
     setInput('')
-
-    // Index the assistant message will occupy: current length + 1 (user msg)
     const assistantIndex = messages.length + 1
 
     setMessages(prev => [
       ...prev,
-      { role: 'user', content: userMessage },
-      { role: 'assistant', content: '', memories: null, grounding: null, streaming: true },
+      { role: 'user', content: userMessage, mid: shortId(), at: clockTime() },
+      { role: 'assistant', content: '', mid: shortId(), at: clockTime(),
+        memories: null, grounding: null, streaming: true },
     ])
     setLoading(true)
 
@@ -740,10 +994,7 @@ function AppInner({ email, onLogout }) {
       const token = localStorage.getItem('engram_token')
       const res = await fetch(`${API_URL}/chat/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ message: userMessage }),
       })
 
@@ -757,49 +1008,32 @@ function AppInner({ email, onLogout }) {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-
         buffer += decoder.decode(value, { stream: true })
 
-        // SSE frames are separated by a blank line
         const frames = buffer.split('\n\n')
-        buffer = frames.pop()          // trailing piece may be incomplete
+        buffer = frames.pop()
 
         for (const frame of frames) {
           const line = frame.trim()
           if (!line.startsWith('data:')) continue
-
           let evt
-          try {
-            evt = JSON.parse(line.slice(5).trim())
-          } catch {
-            continue                   // malformed frame, skip
-          }
+          try { evt = JSON.parse(line.slice(5).trim()) } catch { continue }
 
           setMessages(prev => {
             const next = [...prev]
             const msg = { ...next[assistantIndex] }
-
-            if (evt.type === 'token') {
-              msg.content += evt.text
-            } else if (evt.type === 'memories') {
-              msg.memories = evt.memories
-            } else if (evt.type === 'grounding') {
-              msg.grounding = evt.grounding
-            } else if (evt.type === 'status') {
-              msg.stage = evt.stage
-            } else if (evt.type === 'error') {
-              msg.content = `Error: ${evt.message}`
-              msg.streaming = false
-            } else if (evt.type === 'done') {
-              msg.streaming = false
-              msg.stage = null
-            }
-
+            if (evt.type === 'token') msg.content += evt.text
+            else if (evt.type === 'memories') msg.memories = evt.memories
+            else if (evt.type === 'grounding') msg.grounding = evt.grounding
+            else if (evt.type === 'contradictions') msg.contradictions = evt.contradictions
+            else if (evt.type === 'status') msg.stage = evt.stage
+            else if (evt.type === 'error') { msg.content = `Error: ${evt.message}`; msg.streaming = false }
+            else if (evt.type === 'done') { msg.streaming = false; msg.stage = null }
             next[assistantIndex] = msg
             return next
           })
 
-          if (evt.type === 'done') setGraphRefresh(prev => prev + 1)
+          if (evt.type === 'done') setGraphRefresh(p => p + 1)
         }
       }
     } catch (err) {
@@ -808,7 +1042,7 @@ function AppInner({ email, onLogout }) {
         const next = [...prev]
         next[assistantIndex] = {
           ...next[assistantIndex],
-          content: 'Error connecting to backend.',
+          content: 'Could not reach the backend. Check that the service is awake and try again.',
           streaming: false,
         }
         return next
@@ -818,167 +1052,130 @@ function AppInner({ email, onLogout }) {
     }
   }
 
-  const sendFeedback = async (nodeId, feedbackType) => {
+  const sendFeedback = async (nodeId, feedback) => {
     try {
-      await api.post(`/memory/feedback`, { node_id: nodeId, feedback: feedbackType })
-      setGraphRefresh(prev => prev + 1)
+      await api.post('/memory/feedback', { node_id: nodeId, feedback })
+      setGraphRefresh(p => p + 1)
     } catch (err) {
       console.error('Feedback error:', err)
     }
   }
 
-  const groundingColor = (s) => s >= 0.8 ? 'var(--concept)' : s >= 0.5 ? '#f5c84e' : 'var(--contradiction)'
+  const resetSession = () => { setMessages([]); setGraphRefresh(p => p + 1) }
 
   const lastMsg = messages[messages.length - 1]
-  const showStageIndicator = loading && lastMsg?.role === 'assistant' && lastMsg?.content === ''
+  const stageLabel = loading && lastMsg?.role === 'assistant' && lastMsg?.content === ''
+    ? (lastMsg?.stage || 'thinking')
+    : null
+
+  const scored = messages.filter(m => m.grounding)
+  const meanScore = scored.length
+    ? scored.reduce((s, m) => s + m.grounding.grounding_score, 0) / scored.length
+    : null
+  const turns = messages.filter(m => m.role === 'user').length
+
+  const badges = { chat: turns || null, documents: null, sessions: null, trace: null }
+  const heading = {
+    chat: ['Chat', 'every claim in the reply is checked against the graph'],
+    documents: ['Documents', 'sources ingested into the graph'],
+    sessions: ['Sessions', 'past conversations and what they wrote'],
+    trace: ['Agent Trace', 'which agents ran, and how long each took'],
+  }[view]
 
   return (
-    <div style={{ minHeight: '100vh' }}>
-      <HeroGraph refreshTrigger={graphRefresh} />
+    <div style={{ height: '100vh', display: 'flex', background: 'var(--bg)' }}>
+      <nav style={{ width: 176, flex: 'none', position: 'relative', zIndex: 3,
+        background: 'var(--bg)', display: 'flex', flexDirection: 'column',
+        boxShadow: '3px 0 6px rgba(25,23,21,0.10), 14px 0 30px rgba(25,23,21,0.16)' }}>
+        <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--n300)',
+          display: 'grid', gap: 9, justifyItems: 'start' }}>
+          <span className="eg-mark">
+            <span className="shadow" />
+            <span className="block"><span className="word">engram</span></span>
+          </span>
+          <span className="eg-label">Memory layer</span>
+        </div>
 
-      <div style={{ maxWidth: 920, margin: '0 auto', padding: '40px 24px 64px' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20, gap: 20, flexWrap: 'wrap' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
-              Talk to Engram
-            </h2>
-            <p className="eg-mono" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--ink-dim)' }}>
-              every turn is stored, grounded, and reconciled in the graph above
-            </p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="eg-pill" title={email}>
-              <span className="dot" />
-              {email.length > 24 ? email.slice(0, 22) + '…' : email}
-            </span>
-            <button className="eg-fb no" style={{ padding: '6px 12px' }} onClick={onLogout}>
-              LOG OUT
+        <div style={{ padding: '8px 0' }}>
+          {NAV.map(n => (
+            <button key={n.id} className="eg-nav" data-active={view === n.id}
+              onClick={() => setView(n.id)}>
+              <span>{n.label}</span>
+              {badges[n.id] != null && <span className="badge">{badges[n.id]}</span>}
             </button>
-          </div>
+          ))}
         </div>
 
-        <div className="eg-card" style={{ padding: 20 }}>
-          <div ref={scrollRef} style={{ height: 460, overflowY: 'auto', paddingRight: 8, marginBottom: 16 }}>
-            {messages.length === 0 && (
-              <div className="eg-mono" style={{ textAlign: 'center', padding: '120px 20px', color: 'var(--ink-faint)', fontSize: 13 }}>
-                Start a conversation. Engram will remember.
-              </div>
-            )}
+        <div style={{ marginTop: 'auto', borderTop: '1px solid var(--n300)', padding: '14px 18px',
+          display: 'grid', gap: 8 }}>
+          <span className="eg-label">Signed in</span>
+          <span style={{ fontSize: 12.5, lineHeight: 1.3, wordBreak: 'break-all' }}>{email}</span>
+          <button className="eg-link" style={{ justifySelf: 'start' }} onClick={onLogout}>
+            Log out
+          </button>
+        </div>
+      </nav>
 
-            {messages.map((msg, i) => {
-              // Skip rendering the empty placeholder — the stage indicator covers it
-              if (msg.role === 'assistant' && msg.content === '' && msg.streaming) return null
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '0 24px',
+          height: 56, flex: 'none', background: 'var(--surface)', position: 'relative', zIndex: 2,
+          boxShadow: '0 1px 0 var(--n400), 0 3px 8px rgba(25,23,21,0.07)' }}>
+          <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: '0.02em',
+            textTransform: 'uppercase' }}>{heading[0]}</span>
+          <span style={{ fontSize: 12, color: 'var(--n600)' }}>{heading[1]}</span>
 
-              return (
-                <div key={i} className="eg-fade" style={{ display: 'flex', marginBottom: 14,
-                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                  <div className={msg.role === 'user' ? 'eg-bubble-user' : 'eg-bubble-ai'}
-                    style={{ maxWidth: '86%', borderRadius: 12, padding: '13px 16px', fontSize: 14, lineHeight: 1.5 }}>
-                    <div style={{ whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>
-                      {msg.content}
-                      {msg.streaming && <span className="eg-cursor" />}
-                    </div>
-
-                    {msg.grounding && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <span className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10 }}>
-                            Grounding
-                          </span>
-                          <span className="eg-mono" style={{ color: groundingColor(msg.grounding.grounding_score), fontWeight: 500 }}>
-                            {(msg.grounding.grounding_score * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                        {msg.grounding.citations?.length > 0 && (
-                          <div style={{ marginBottom: 8 }}>
-                            <div style={{ color: 'var(--ink-dim)', marginBottom: 4 }}>✓ Verified</div>
-                            {msg.grounding.citations.map((c, j) => (
-                              <div key={j} style={{ color: 'var(--ink-dim)', marginLeft: 8, marginBottom: 2 }}>
-                                {c.claim.substring(0, 80)}…
-                                <span style={{ color: 'var(--concept)', marginLeft: 6 }} className="eg-mono">
-                                  {(c.trust_score * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {msg.grounding.ungrounded_claims?.length > 0 && (
-                          <div>
-                            <div style={{ color: '#f5c84e', marginBottom: 4 }}>⚠ Unverified</div>
-                            {msg.grounding.ungrounded_claims.map((c, j) => (
-                              <div key={j} style={{ color: 'var(--ink-faint)', marginLeft: 8 }}>{c.substring(0, 80)}…</div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {msg.memories?.length > 0 && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line-strong)', fontSize: 12 }}>
-                        <div className="eg-mono" style={{ color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 10, marginBottom: 6 }}>
-                          Memories used
-                        </div>
-                        {msg.memories.map((m, j) => (
-                          <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 0', gap: 10 }}>
-                            <span style={{ color: 'var(--ink-dim)' }}>
-                              <span className="eg-sw" style={{ color: TYPE_COLOR[m.type] || FALLBACK, background: TYPE_COLOR[m.type] || FALLBACK, marginRight: 7 }} />
-                              {m.text}
-                              <span className="eg-mono" style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
-                                {(m.similarity * 100).toFixed(0)}%
-                              </span>
-                            </span>
-                            <span style={{ display: 'flex', gap: 6 }}>
-                              <button className="eg-fb ok" title="Mark correct" onClick={() => sendFeedback(m.id, 'correct')}>✓</button>
-                              <button className="eg-fb no" title="Mark incorrect" onClick={() => sendFeedback(m.id, 'incorrect')}>✗</button>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {msg.contradictions?.length > 0 && (
-                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,93,108,0.3)', fontSize: 12 }}>
-                        <div style={{ color: 'var(--contradiction)', marginBottom: 4 }}>⚠ Contradictions detected</div>
-                        {msg.contradictions.map((c, j) => (
-                          <div key={j} style={{ color: 'var(--ink-dim)' }}>
-                            {c.existing_fact} → superseded by → {c.new_fact}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-
-            {showStageIndicator && (
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div className="eg-bubble-ai eg-mono" style={{ borderRadius: 12, padding: '13px 16px', color: 'var(--ink-dim)', fontSize: 13 }}>
-                  {lastMsg?.stage || 'thinking'}
-                  <span style={{ animation: 'egblink 1.2s infinite' }}>…</span>
-                </div>
-              </div>
-            )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="eg-mono" style={{ fontSize: 11, letterSpacing: '0.08em',
+              textTransform: 'uppercase', color: 'var(--n600)' }}>
+              session {sessionId}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8,
+              border: '1px solid var(--n400)', padding: '5px 10px', fontFamily: 'var(--mono)',
+              fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+              <span style={{ width: 7, height: 7, flex: 'none', background: 'var(--accent)' }} />
+              live
+            </span>
+            <button className="eg-ghost" onClick={resetSession}>Reset session</button>
           </div>
+        </header>
 
-          <div style={{ display: 'flex', gap: 10 }}>
-            <input
-              className="eg-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              placeholder="Tell Engram something…"
-              disabled={loading}
+        {view === 'chat' ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'grid',
+            gridTemplateColumns: 'minmax(0,42fr) 1px minmax(0,58fr)' }}>
+            <MemoryGraphPanel refreshTrigger={graphRefresh} />
+            <span style={{ background: 'var(--n400)' }} />
+            <Transcript
+              messages={messages}
+              stageLabel={stageLabel}
+              input={input}
+              setInput={setInput}
+              send={sendMessage}
+              loading={loading}
+              onFeedback={sendFeedback}
+              meanScore={meanScore}
+              turns={turns}
             />
-            <button className="eg-send" onClick={sendMessage} disabled={loading}>SEND</button>
           </div>
-        </div>
-
-        <TracePanel refreshTrigger={graphRefresh} />
-
-        <p className="eg-mono" style={{ textAlign: 'center', marginTop: 28, fontSize: 11, color: 'var(--ink-faint)' }}>
-          Engram · multi-agent memory operating system · Ritish Nandikonda · 2026
-        </p>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex',
+            flexDirection: 'column', background: 'var(--surface)' }}>
+            {view === 'trace' && <TraceScreen refreshTrigger={graphRefresh} />}
+            {view === 'documents' && (
+              <PendingScreen
+                title="Documents"
+                body="Ingested PDFs and URLs will list here with how many nodes each one wrote into the graph."
+                endpoint="GET /api/documents"
+              />
+            )}
+            {view === 'sessions' && (
+              <PendingScreen
+                title="Sessions"
+                body="Past conversations will list here, each showing what it added to the graph."
+                endpoint="GET /api/sessions"
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
