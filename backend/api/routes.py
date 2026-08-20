@@ -1,13 +1,18 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime
-from backend.agents.orchestrator import chat, process_memory_background
 from backend.graph.graph_client import graph_client
 from backend.core.auth import get_current_user
 from fastapi.responses import StreamingResponse
 from backend.agents.orchestrator import chat, chat_stream, process_memory_background
 import json
+
 router = APIRouter()
+
+
+# Node labels that belong in the memory graph. TraceEvent and other
+# operational nodes carry user_id too, so an unfiltered match returns them.
+GRAPH_TYPES = ["Episode", "Concept", "Entity", "Source", "Contradiction"]
 
 
 # ────────────────────────────────────────────────────────────────
@@ -69,17 +74,21 @@ def get_graph(user_id: str = Depends(get_current_user)):
     nodes = graph_client.run("""
         MATCH (n)
         WHERE n.user_id = $user_id
-        RETURN labels(n)[0] as type, n.id as id,
+          AND any(l IN labels(n) WHERE l IN $types)
+        RETURN [l IN labels(n) WHERE l IN $types][0] as type,
+               n.id as id,
                coalesce(n.summary, n.content, n.name, '') as label,
                n.confidence as confidence,
                n.ttl_tier as tier
-        """, {"user_id": user_id})
+        """, {"user_id": user_id, "types": GRAPH_TYPES})
 
     edges = graph_client.run("""
         MATCH (a)-[r]->(b)
         WHERE a.user_id = $user_id AND b.user_id = $user_id
+          AND any(l IN labels(a) WHERE l IN $types)
+          AND any(l IN labels(b) WHERE l IN $types)
         RETURN a.id as source, b.id as target, type(r) as relationship
-        """, {"user_id": user_id})
+        """, {"user_id": user_id, "types": GRAPH_TYPES})
 
     return {"nodes": nodes, "edges": edges}
 
@@ -158,6 +167,7 @@ def feedback_endpoint(
         return {"status": "edited", "node_id": request.node_id}
 
     raise HTTPException(status_code=400, detail="Invalid feedback type")
+
 
 @router.post("/chat/stream")
 def chat_stream_endpoint(
