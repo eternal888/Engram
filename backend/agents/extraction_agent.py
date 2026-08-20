@@ -1,4 +1,3 @@
-
 import json
 import uuid
 from datetime import datetime, timezone
@@ -12,12 +11,12 @@ Return ONLY valid JSON with this exact structure:
         {"name": "entity name", "type": "person/place/organization/thing", "description": "brief description"}
     ],
     "facts": [
-        {"content": "a fact that was stated", "confidence": 0.9}
+        {"content": "terse fact phrase", "confidence": 0.9}
     ],
     "relationships": [
         {"from": "entity name", "to": "entity name", "type": "relationship type"}
     ],
-    "episode_summary": "one sentence summary of this conversation turn"
+    "episode_summary": "two to four word label for this turn"
 }
 
 Rules:
@@ -27,7 +26,26 @@ Rules:
   that a question was asked, not anything true of the user. If a turn is
   purely a question and states nothing, return an empty facts list.
 - Confidence score 0.0 to 1.0
-- Return valid JSON only, no other text"""
+- Return valid JSON only, no other text
+
+Phrasing facts:
+- Write each fact as a short phrase, ideally under six words. These are index
+  entries, not sentences.
+- Drop "the user" when the user is the subject. Keep the subject when anyone
+  or anything else is.
+- No leading verbs of speech or reporting: not "states that", "mentions",
+  "expresses interest in", "introduces themselves as".
+- Good: "lives in Boca Raton" / "prefers Python" / "no ML background" /
+  "team of three" / "sister works in logistics" / "deadline moved to June"
+- Bad: "The user states that they live in Boca Raton" /
+  "User expresses interest in learning AI" /
+  "The user introduced themselves as Ritish"
+
+Episode summary:
+- A short label naming what the turn was, not a sentence describing it.
+- Good: "onboarding turn" / "deadline change" / "stack preferences"
+- Bad: "The user introduced themselves and shared their location"
+"""
 
 
 def _extract_json(raw: str) -> dict:

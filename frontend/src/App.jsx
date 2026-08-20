@@ -52,6 +52,16 @@ api.interceptors.response.use(
 
 const shortId = () => Math.random().toString(16).slice(2, 9)
 const truncate = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+
+/* Extraction still emits reporting phrases on some turns. Strip the shared
+   prefix so labels differ from each other in the first few characters. */
+const LEAD = /^(THE USER |USER'S |USER IS ASKING ABOUT |USER IS |USER ASKED ABOUT |USER ASKED |USER REQUESTED |USER STATED |USER EXPRESSED |USER EXPRESSES |USER INTRODUCES |USER )/
+const nodeLabel = (raw, type) => {
+  let t = (raw || type || '').toString().toUpperCase().trim()
+  const stripped = t.replace(LEAD, '')
+  if (stripped.length > 2) t = stripped
+  return truncate(t, 14)
+}
 const clockTime = () =>
   new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
@@ -82,7 +92,7 @@ function StyleTokens() {
 
       .eg-mono{font-family:var(--mono)}
       .eg-label{
-        font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:0.14em;
+        font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:0.06em;
         text-transform:uppercase;color:var(--n600);
       }
 
@@ -106,32 +116,32 @@ function StyleTokens() {
 
       .eg-nav{
         display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
-        padding:9px 18px;background:transparent;border:0;border-left:2px solid transparent;
-        font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:0.12em;
+        padding:10px 20px;background:transparent;border:0;border-left:3px solid transparent;
+        font-family:var(--sans);font-size:12.5px;font-weight:800;letter-spacing:0.04em;
         text-transform:uppercase;color:var(--n600);cursor:pointer;text-align:left;
         transition:color 140ms ease,background 140ms ease;
       }
       .eg-nav:hover{color:var(--ink);background:var(--n200)}
       .eg-nav:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
       .eg-nav[data-active="true"]{color:var(--ink);border-left-color:var(--ink);background:var(--n200)}
-      .eg-nav .badge{font-weight:400;color:var(--n500);letter-spacing:0.06em}
+      .eg-nav .badge{font-family:var(--mono);font-weight:400;color:var(--n500);letter-spacing:0.06em}
 
       .eg-panel-title{
-        font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:0.16em;
+        font-family:var(--sans);font-size:12.5px;font-weight:800;letter-spacing:0.05em;
         text-transform:uppercase;color:var(--ink);
       }
 
       .eg-input{
         flex:1;min-width:0;background:var(--surface);border:1px solid var(--n400);
-        padding:13px 15px;color:var(--ink);font-family:var(--sans);font-size:14px;
+        padding:15px 17px;color:var(--ink);font-family:var(--sans);font-size:15px;
         outline:none;transition:border-color 140ms ease;
       }
       .eg-input:focus{border-color:var(--ink)}
       .eg-input::placeholder{color:var(--n500)}
 
       .eg-send{
-        font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:0.14em;
-        text-transform:uppercase;padding:0 24px;border:1px solid var(--ink);
+        font-family:var(--sans);font-size:13px;font-weight:800;letter-spacing:0.05em;
+        text-transform:uppercase;padding:0 28px;border:1px solid var(--ink);
         background:var(--ink);color:var(--surface);cursor:pointer;
         transition:background 140ms ease,color 140ms ease;
       }
@@ -140,8 +150,8 @@ function StyleTokens() {
       .eg-send:disabled{background:var(--n400);border-color:var(--n400);color:var(--surface);cursor:not-allowed}
 
       .eg-ghost{
-        font-family:var(--mono);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;
-        padding:4px 9px;background:transparent;border:1px solid var(--n400);color:var(--n700);
+        font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;
+        padding:6px 12px;background:transparent;border:1px solid var(--n400);color:var(--n700);
         cursor:pointer;transition:border-color 140ms ease,color 140ms ease;
       }
       .eg-ghost:hover{border-color:var(--ink);color:var(--ink)}
@@ -149,22 +159,22 @@ function StyleTokens() {
       .eg-ghost[data-tone="warn"]:hover{border-color:var(--accent);color:var(--accent-700)}
 
       .eg-link{
-        font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:0.12em;
+        font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:0.04em;
         text-transform:uppercase;background:none;border:0;padding:0;cursor:pointer;
         color:var(--n700);text-decoration:underline;text-underline-offset:3px;
       }
       .eg-link:hover{color:var(--ink)}
       .eg-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 
-      .eg-turn{padding:18px 26px;border-bottom:1px solid var(--n300)}
+      .eg-turn{padding:22px 30px;border-bottom:1px solid var(--n300)}
       .eg-turn[data-weak="true"]{background:var(--n200)}
       .eg-rule{width:2px;flex:none;background:var(--n400);align-self:stretch}
       .eg-rule[data-weak="true"]{background:var(--accent)}
 
       .eg-seg{display:inline-flex;gap:2px;align-items:center}
-      .eg-seg i{width:4px;height:11px;background:var(--n400);display:block}
+      .eg-seg i{width:4px;height:13px;background:var(--n400);display:block}
 
-      .eg-claim{display:flex;align-items:center;gap:11px;padding:5px 0;font-size:13px}
+      .eg-claim{display:flex;align-items:center;gap:12px;padding:7px 0;font-size:14px}
       .eg-tick{width:10px;height:10px;flex:none;background:var(--ink)}
       .eg-tick[data-off="true"]{background:transparent;border:1.5px solid var(--accent)}
 
@@ -294,7 +304,9 @@ function AuthScreen({ onAuthed }) {
    ────────────────────────────────────────────────────────────── */
 const SLEEP_ENERGY = 0.012
 const SLEEP_FRAMES = 24
-const LABEL_LIMIT  = 40
+const LABEL_LIMIT  = 34
+// Above the limit only these carry standing labels; episodes label on hover.
+const ALWAYS_LABEL = new Set(['Entity', 'Concept', 'Contradiction'])
 
 function MemoryGraphPanel({ refreshTrigger }) {
   const hostRef = useRef(null)
@@ -305,6 +317,8 @@ function MemoryGraphPanel({ refreshTrigger }) {
   const drawRef = useRef(() => {})
   const wakeRef = useRef(() => {})
   const [counts, setCounts] = useState({ nodes: 0, edges: 0, byType: {} })
+  const [showEpisodes, setShowEpisodes] = useState(true)
+  const showEpisodesRef = useRef(true)
 
   const loadGraph = useCallback(async () => {
     try {
@@ -314,16 +328,27 @@ function MemoryGraphPanel({ refreshTrigger }) {
       const idMap = new Map()
       const byType = {}
 
-      const nodes = res.data.nodes.map((n, i) => {
+      // Shrink nodes as the graph grows so density stays workable.
+      const count = res.data.nodes.filter(
+        n => showEpisodesRef.current || n.type !== 'Episode'
+      ).length
+      const scale = Math.max(0.55, Math.min(1, Math.sqrt(20 / Math.max(1, count))))
+
+      const visible = res.data.nodes.filter(
+        n => showEpisodesRef.current || n.type !== 'Episode'
+      )
+
+      for (const n of res.data.nodes) byType[n.type] = (byType[n.type] || 0) + 1
+
+      const nodes = visible.map((n, i) => {
         const type = n.type
-        byType[type] = (byType[type] || 0) + 1
         // area encodes strength, so radius scales with the square root
         const strength = typeof n.confidence === 'number' ? n.confidence : 0.6
         idMap.set(n.id, i)
         return {
           id: n.id, idx: i, type,
-          label: truncate((n.label || type || '').toString().toUpperCase(), 22),
-          r: 7 + Math.sqrt(Math.max(0.05, strength)) * 11 + (type === 'Contradiction' ? 3 : 0),
+          label: nodeLabel(n.label, type),
+          r: (5 + Math.sqrt(Math.max(0.05, strength)) * 7.5 + (type === 'Contradiction' ? 2 : 0)) * scale,
           x: w * 0.5 + (Math.random() - 0.5) * w * 0.6,
           y: h * 0.5 + (Math.random() - 0.5) * h * 0.7,
           vx: 0, vy: 0,
@@ -352,7 +377,10 @@ function MemoryGraphPanel({ refreshTrigger }) {
     }
   }, [])
 
-  useEffect(() => { loadGraph() }, [loadGraph, refreshTrigger])
+  useEffect(() => {
+    showEpisodesRef.current = showEpisodes
+    loadGraph()
+  }, [loadGraph, refreshTrigger, showEpisodes])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -376,19 +404,37 @@ function MemoryGraphPanel({ refreshTrigger }) {
       const cx = W / 2, cy = H / 2
       let energy = 0
 
+      // Spacing follows the area each node can claim, so the graph fills the
+      // panel at any count instead of clumping once it grows.
+      const cell = Math.sqrt((W * H) / Math.max(1, nodes.length))
+      const rest = Math.max(70, Math.min(210, cell * 0.92))
+      const sep = Math.max(26, Math.min(70, cell * 0.46))
+      // Fewer nodes need holding together; many push themselves apart.
+      // The vertical pull is weaker so the layout uses the full panel height
+      // rather than settling into a horizontal band.
+      const pull = 0.0009 * Math.max(0.3, Math.min(1, 14 / Math.max(1, nodes.length)))
+
       for (const n of nodes) {
-        n.vx += (cx - n.x) * 0.0011
-        n.vy += (cy - n.y) * 0.0011
+        n.vx += (cx - n.x) * pull
+        n.vy += (cy - n.y) * pull * 0.55
       }
+      // Inverse-square repulsion across every pair — this is what opens the
+      // graph out. Overlap prevention alone only stops collisions.
+      const charge = cell * cell * 0.115
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i], b = nodes[j]
-          const dx = a.x - b.x, dy = a.y - b.y
-          const min = a.r + b.r + 66
-          const d2 = dx * dx + dy * dy
-          if (d2 < min * min && d2 > 0.01) {
-            const d = Math.sqrt(d2), f = 0.7 * (1 - d / min) / d
-            a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f
+          let dx = a.x - b.x, dy = a.y - b.y
+          let d2 = dx * dx + dy * dy
+          if (d2 < 1) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = 1 }
+          const d = Math.sqrt(d2)
+          const f = Math.min(charge / d2, 2.4) / d
+          a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f
+
+          const min = a.r + b.r + sep
+          if (d < min) {
+            const g = 0.8 * (1 - d / min) / d
+            a.vx += dx * g; a.vy += dy * g; b.vx -= dx * g; b.vy -= dy * g
           }
         }
       }
@@ -396,20 +442,29 @@ function MemoryGraphPanel({ refreshTrigger }) {
         const a = nodes[e.a], b = nodes[e.b]
         const dx = b.x - a.x, dy = b.y - a.y
         const d = Math.hypot(dx, dy) || 0.001
-        const f = (d - 175) * 0.0026
+        const f = (d - rest) * 0.0034
         a.vx += (dx / d) * f; a.vy += (dy / d) * f
         b.vx -= (dx / d) * f; b.vy -= (dy / d) * f
       }
+      // A soft margin rather than a hard wall. Clamping made unconnected
+      // nodes queue along the frame; this turns them back before they land.
+      const margin = Math.max(40, cell * 0.5)
       for (const n of nodes) {
+        const push = 0.045
+        if (n.x < margin) n.vx += (margin - n.x) * push
+        else if (n.x > W - margin) n.vx -= (n.x - (W - margin)) * push
+        if (n.y < margin) n.vy += (margin - n.y) * push
+        else if (n.y > H - margin) n.vy -= (n.y - (H - margin)) * push
+
         n.vx *= 0.84; n.vy *= 0.84
         const sp = Math.hypot(n.vx, n.vy)
         if (sp > 2.5) { n.vx = n.vx / sp * 2.5; n.vy = n.vy / sp * 2.5 }
         n.x += n.vx; n.y += n.vy
-        const pad = n.r + 30
-        if (n.x < pad) { n.x = pad; n.vx *= -0.4 }
-        else if (n.x > W - pad) { n.x = W - pad; n.vx *= -0.4 }
-        if (n.y < pad) { n.y = pad; n.vy *= -0.4 }
-        else if (n.y > H - pad) { n.y = H - pad; n.vy *= -0.4 }
+
+        // hard stop only at the very edge, as a last resort
+        const pad = n.r + 6
+        n.x = Math.max(pad, Math.min(W - pad, n.x))
+        n.y = Math.max(pad, Math.min(H - pad, n.y))
         energy += n.vx * n.vx + n.vy * n.vy
       }
       return nodes.length ? energy / nodes.length : 0
@@ -422,7 +477,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
 
       const focus = selected >= 0 ? selected : hover
       const near = focus >= 0 ? new Set([focus, ...(adj.get(focus) || [])]) : null
-      const dim = (i) => (near && !near.has(i) ? 0.22 : 1)
+      const dim = (i) => (near && !near.has(i) ? 0.4 : 1)
 
       for (const e of edges) {
         const a = nodes[e.a], b = nodes[e.b]
@@ -469,7 +524,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
       // Labels last, so a node never covers one. A label flips to the left
       // when it would leave the panel, and is skipped when it would land on
       // one already placed — the focused node always wins its slot.
-      ctx.font = '700 9.5px "JetBrains Mono", monospace'
+      ctx.font = '700 9px "JetBrains Mono", monospace'
       ctx.textBaseline = 'middle'
       const placed = []
       const order = focus >= 0 ? [nodes[focus], ...nodes.filter(n => n.idx !== focus)] : nodes
@@ -477,13 +532,13 @@ function MemoryGraphPanel({ refreshTrigger }) {
 
       for (const n of order) {
         const isFocus = focus === n.idx
-        if (!showAll && !isFocus) continue
+        if (!showAll && !isFocus && !ALWAYS_LABEL.has(n.type)) continue
 
         const w = ctx.measureText(n.label).width
-        const gap = n.r + 11
+        const gap = n.r + 7
         const flip = n.x + gap + w > W - 10
         const x = flip ? n.x - gap - w : n.x + gap
-        const box = { x, y: n.y - 7, w, h: 14 }
+        const box = { x, y: n.y - 6, w, h: 12 }
 
         const clash = placed.some(p =>
           box.x < p.x + p.w && box.x + box.w > p.x &&
@@ -497,7 +552,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
         ctx.globalAlpha = dim(n.idx)
         // knock the cream back out from under the text so edges don't cross it
         ctx.fillStyle = '#f4ecdc'
-        ctx.fillRect(box.x - 3, box.y, w + 6, 14)
+        ctx.fillRect(box.x - 2, box.y, w + 4, 12)
         ctx.fillStyle = c.label
         ctx.fillText(n.label, x, n.y)
         ctx.restore()
@@ -576,9 +631,9 @@ function MemoryGraphPanel({ refreshTrigger }) {
     <section style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
       background: 'var(--bg)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 22px 14px 34px', flex: 'none' }}>
+        padding: '16px 22px 16px 34px', flex: 'none' }}>
         <span className="eg-panel-title">Memory graph</span>
-        <span className="eg-mono" style={{ fontSize: 10.5, letterSpacing: '0.1em',
+        <span className="eg-mono" style={{ fontSize: 11.5, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: 'var(--n600)' }}>
           {counts.nodes} nodes · {counts.edges} edges
         </span>
@@ -603,19 +658,24 @@ function MemoryGraphPanel({ refreshTrigger }) {
       <div style={{ padding: '16px 22px 18px 34px', flex: 'none', display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', alignItems: 'baseline' }}>
           <span className="eg-label" style={{ color: 'var(--ink)' }}>How to read</span>
-          <span className="eg-mono" style={{ fontSize: 10, letterSpacing: '0.08em',
-            textTransform: 'uppercase', color: 'var(--n600)' }}>
+          <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, fontWeight: 600,
+            letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--n600)' }}>
             Area = strength · red = contradiction · click a node to isolate it
           </span>
+          <button className="eg-link" style={{ marginLeft: 'auto' }}
+            onClick={() => setShowEpisodes(v => !v)} aria-pressed={showEpisodes}>
+            {showEpisodes ? 'Hide turns' : 'Show turns'}
+          </button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
-          gap: '5px 20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))',
+          gridAutoFlow: 'column', gridTemplateRows: 'repeat(3,auto)', gap: '7px 26px' }}>
           {legend.map(([type, name]) => {
             const c = NODE[type]
             return (
               <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 9,
-                fontFamily: 'var(--mono)', fontSize: 10.5, letterSpacing: '0.08em',
-                textTransform: 'uppercase', color: 'var(--n700)' }}>
+                fontFamily: 'var(--sans)', fontSize: 12.5, fontWeight: 700,
+                letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--n700)',
+                opacity: type === 'Episode' && !showEpisodes ? 0.4 : 1 }}>
                 <span style={{ width: 11, height: 11, flex: 'none', borderRadius: '50%',
                   background: c.fill,
                   border: type === 'Entity' || type === 'Source' ? `3px solid ${c.ring}` : 'none' }} />
@@ -754,7 +814,7 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
   return (
     <div style={{ marginTop: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        <span className="eg-mono" style={{ fontSize: 19, fontWeight: 700, color: tone,
+        <span className="eg-mono" style={{ fontSize: 22, fontWeight: 700, color: tone,
           letterSpacing: '-0.01em' }}>
           {(score * 100).toFixed(0)}%
         </span>
@@ -764,7 +824,7 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
             <i key={i} style={i < filled ? { background: tone } : undefined} />
           ))}
         </span>
-        <span className="eg-mono" style={{ fontSize: 11.5, color: 'var(--n700)' }}>{summary}</span>
+        <span className="eg-mono" style={{ fontSize: 12.5, color: 'var(--n700)' }}>{summary}</span>
         {total > 0 && (
           <button className="eg-link" style={{ marginLeft: 'auto' }}
             onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -857,9 +917,9 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
     <section style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
       background: 'var(--surface)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 26px', flex: 'none', borderBottom: '1px solid var(--n300)' }}>
+        padding: '16px 30px', flex: 'none', borderBottom: '1px solid var(--n300)' }}>
         <span className="eg-panel-title">Transcript</span>
-        <span className="eg-mono" style={{ fontSize: 10.5, letterSpacing: '0.1em',
+        <span className="eg-mono" style={{ fontSize: 11.5, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: 'var(--n600)' }}>
           {turns} turns{meanScore != null && ` · mean grounding ${(meanScore * 100).toFixed(0)}%`}
         </span>
@@ -869,7 +929,7 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
         {messages.length === 0 && (
           <div style={{ padding: '90px 34px', maxWidth: 460 }}>
             <div className="eg-label" style={{ marginBottom: 10 }}>Nothing stored yet</div>
-            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--ink-dim)' }}>
+            <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
               Say something and it gets recorded, not answered from. The first few turns
               build the graph; grounding starts once there's something to ground against.
             </p>
@@ -896,7 +956,7 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
               <div style={{ display: 'flex', gap: 15 }}>
                 <span className="eg-rule" data-weak={weak} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, lineHeight: 1.55 }}>
+                  <div style={{ fontSize: 16, lineHeight: 1.6 }}>
                     {msg.role === 'assistant'
                       ? <Markdown text={msg.content} />
                       : <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>}
@@ -926,7 +986,7 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
         )}
       </div>
 
-      <div style={{ flex: 'none', display: 'flex', gap: 10, padding: '16px 26px',
+      <div style={{ flex: 'none', display: 'flex', gap: 12, padding: '18px 30px',
         borderTop: '1px solid var(--n300)' }}>
         <input
           className="eg-input"
@@ -990,7 +1050,7 @@ function TraceScreen({ refreshTrigger }) {
       {!loading && traces.length === 0 && (
         <div style={{ maxWidth: 420 }}>
           <div className="eg-label" style={{ marginBottom: 10 }}>No traces</div>
-          <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--ink-dim)' }}>
+          <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
             Every turn writes a trace of which agents ran and how long each took.
             Send a message to make one.
           </p>
@@ -1059,17 +1119,287 @@ function TraceScreen({ refreshTrigger }) {
   )
 }
 
-/* Placeholder until the endpoints exist. Says what's missing rather than faking a table. */
-function PendingScreen({ title, body, endpoint }) {
+/* ──────────────────────────────────────────────────────────────
+   Documents. Ingest by URL or PDF, then list what landed.
+   Page counts are not stored on Source nodes, so the table reports
+   chunks written — which is what actually entered the graph.
+   ────────────────────────────────────────────────────────────── */
+function DocumentsScreen({ onIngest }) {
+  const [docs, setDocs] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const fileRef = useRef(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await api.get('/documents')
+      setDocs(res.data.documents || [])
+    } catch (err) {
+      console.error('Failed to load documents:', err)
+      setError('Could not load documents.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const fail = (err, fallback) => {
+    const d = err.response?.data?.detail
+    setError(typeof d === 'string' ? d : fallback)
+  }
+
+  const ingestUrl = async () => {
+    if (!url.trim() || busy) return
+    setError(''); setBusy('url')
+    try {
+      await api.post('/documents/url', { url: url.trim() })
+      setUrl('')
+      await load()
+      onIngest()
+    } catch (err) {
+      fail(err, 'Could not fetch that URL.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const uploadPdf = async (file) => {
+    if (!file || busy) return
+    setError(''); setBusy('file')
+    const form = new FormData()
+    form.append('file', file)
+    try {
+      // Content-Type is left unset so the browser adds the multipart boundary
+      await api.post('/documents/upload', form)
+      await load()
+      onIngest()
+    } catch (err) {
+      fail(err, 'Could not read that PDF.')
+    } finally {
+      setBusy('')
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const remove = async (id) => {
+    try {
+      await api.delete(`/documents/${id}`)
+      await load()
+      onIngest()
+    } catch (err) {
+      fail(err, 'Could not delete that document.')
+    }
+  }
+
+  const totalChunks = docs.reduce((s, d) => s + (d.total_chunks || 0), 0)
+  const totalPages = docs.reduce((s, d) => s + (d.page_count || 0), 0)
+
   return (
-    <div style={{ padding: '26px 34px', maxWidth: 460 }}>
-      <div className="eg-label" style={{ marginBottom: 10 }}>{title}</div>
-      <p style={{ margin: '0 0 14px', fontSize: 15, lineHeight: 1.55, color: 'var(--ink-dim)' }}>
-        {body}
-      </p>
-      <span className="eg-mono" style={{ fontSize: 11.5, color: 'var(--n600)' }}>
-        Waiting on {endpoint}
-      </span>
+    <div style={{ overflowY: 'auto', padding: '26px 34px 40px' }}>
+      <div className="eg-label" style={{ marginBottom: 8 }}>Ingest a source</div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
+        <input
+          className="eg-input"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && ingestUrl()}
+          placeholder="https://…"
+          disabled={!!busy}
+        />
+        <button className="eg-send" style={{ padding: '0 30px', flex: 'none' }}
+          onClick={ingestUrl} disabled={!!busy}>
+          {busy === 'url' ? 'Reading' : 'Ingest'}
+        </button>
+        <button className="eg-send" style={{ padding: '0 30px', flex: 'none',
+          background: 'transparent', color: 'var(--ink)' }}
+          onClick={() => fileRef.current?.click()} disabled={!!busy}>
+          {busy === 'file' ? 'Reading' : 'Upload PDF'}
+        </button>
+        <input ref={fileRef} type="file" accept="application/pdf" style={{ display: 'none' }}
+          onChange={(e) => uploadPdf(e.target.files?.[0])} />
+      </div>
+
+      {error && <div className="eg-err" style={{ marginTop: 14 }}>{error}</div>}
+
+      <div style={{ height: 1, background: 'var(--n400)', margin: '26px 0 20px' }} />
+
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 14 }}>
+        <span className="eg-panel-title">Documents</span>
+        <span className="eg-label">
+          {docs.length} sources · {totalChunks} nodes written
+          {totalPages > 0 && ` · ${totalPages} pages`}
+        </span>
+      </div>
+
+      {loading && <div className="eg-label">Loading</div>}
+
+      {!loading && docs.length === 0 && (
+        <p style={{ margin: 0, maxWidth: 460, fontSize: 16, lineHeight: 1.6,
+          color: 'var(--ink-dim)' }}>
+          Nothing ingested yet. Add a URL or a PDF and its text becomes
+          retrievable alongside everything you've said.
+        </p>
+      )}
+
+      {!loading && docs.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14,
+          tableLayout: 'fixed' }}>
+          <colgroup>
+            <col />
+            <col style={{ width: 110 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 150 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 90 }} />
+          </colgroup>
+          <thead>
+            <tr>
+              {[
+                ['Source', 'left'], ['Kind', 'left'], ['Pages', 'right'],
+                ['Nodes written', 'right'], ['Added', 'left'], ['', 'right'],
+              ].map(([h, align], i) => (
+                <th key={i} className="eg-label" style={{ textAlign: align,
+                  padding: '0 14px 10px 0', borderBottom: '1px solid var(--n400)',
+                  fontWeight: 500 }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {docs.map((d) => (
+              <tr key={d.document_id} style={{ borderBottom: '1px solid var(--n300)' }}>
+                <td style={{ padding: '14px 14px 14px 0' }}>
+                  <span style={{ display: 'block', overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {d.document_name}
+                  </span>
+                  {d.source_url && (
+                    <a href={d.source_url} target="_blank" rel="noreferrer"
+                      className="eg-mono" style={{ display: 'block', marginTop: 2,
+                        fontSize: 11, color: 'var(--n600)', overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {d.source_url.replace(/^https?:\/\//, '')}
+                    </a>
+                  )}
+                </td>
+                <td className="eg-mono" style={{ padding: '14px 14px 14px 0', fontSize: 11,
+                  letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--n600)' }}>
+                  {d.document_source}
+                </td>
+                <td className="eg-mono" style={{ padding: '14px 14px 14px 0', textAlign: 'right',
+                  color: d.page_count ? 'var(--ink)' : 'var(--n500)' }}>
+                  {d.page_count || '—'}
+                </td>
+                <td className="eg-mono" style={{ padding: '14px 14px 14px 0', textAlign: 'right' }}>
+                  {d.total_chunks}
+                </td>
+                <td className="eg-mono" style={{ padding: '14px 14px 14px 0', fontSize: 11.5,
+                  color: 'var(--n600)' }}>
+                  {(d.created_at || '').slice(0, 10)}
+                </td>
+                <td style={{ padding: '14px 0', textAlign: 'right' }}>
+                  <button className="eg-ghost" data-tone="warn"
+                    onClick={() => remove(d.document_id)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Sessions. Episodes carry no session id, so turns are grouped by
+   the day they were written — a real boundary rather than a fake one.
+   ────────────────────────────────────────────────────────────── */
+const DAY_FMT = { weekday: 'long', day: 'numeric', month: 'long' }
+
+function SessionsScreen({ refreshTrigger }) {
+  const [episodes, setEpisodes] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    api.get('/memory/episodes')
+      .then(res => { if (alive) setEpisodes(res.data.episodes || []) })
+      .catch(err => console.error('Failed to load episodes:', err))
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [refreshTrigger])
+
+  const days = useMemo(() => {
+    const groups = new Map()
+    for (const e of episodes) {
+      const key = (e.created_at || '').slice(0, 10)
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(e)
+    }
+    return [...groups.entries()]
+  }, [episodes])
+
+  const dayLabel = (key) => {
+    if (!key) return 'Undated'
+    const d = new Date(key + 'T00:00:00')
+    const today = new Date().toISOString().slice(0, 10)
+    if (key === today) return 'Today'
+    return d.toLocaleDateString('en-GB', DAY_FMT)
+  }
+
+  const clock = (iso) => {
+    if (!iso) return ''
+    const t = iso.includes('T') ? iso.split('T')[1] : ''
+    return t.slice(0, 5)
+  }
+
+  return (
+    <div style={{ overflowY: 'auto', padding: '26px 34px' }}>
+      {loading && <div className="eg-label">Loading</div>}
+
+      {!loading && episodes.length === 0 && (
+        <div style={{ maxWidth: 440 }}>
+          <div className="eg-label" style={{ marginBottom: 10 }}>Nothing recorded</div>
+          <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
+            Every turn you take is written as an episode. Say something in Chat
+            and it will appear here.
+          </p>
+        </div>
+      )}
+
+      {days.map(([key, items]) => (
+        <div key={key} style={{ marginBottom: 30 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12,
+            paddingBottom: 8, borderBottom: '1px solid var(--n400)' }}>
+            <span className="eg-panel-title">{dayLabel(key)}</span>
+            <span className="eg-label">{items.length} turns</span>
+          </div>
+
+          {items.map((e) => (
+            <div key={e.id} style={{ display: 'flex', gap: 16, padding: '11px 0',
+              borderBottom: '1px solid var(--n300)', alignItems: 'baseline' }}>
+              <span className="eg-mono" style={{ width: 46, flex: 'none', fontSize: 11.5,
+                color: 'var(--n600)' }}>
+                {clock(e.created_at)}
+              </span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 14 }}>
+                {e.summary || <span style={{ color: 'var(--n500)' }}>no summary</span>}
+              </span>
+              <span className="eg-mono" style={{ flex: 'none', fontSize: 11.5,
+                color: e.confidence >= 0.9 ? 'var(--ink)' : 'var(--n600)' }}>
+                {e.confidence != null ? e.confidence.toFixed(2) : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -1195,7 +1525,7 @@ function AppInner({ email, onLogout }) {
 
   return (
     <div style={{ height: '100vh', display: 'flex', background: 'var(--bg)' }}>
-      <nav style={{ width: 176, flex: 'none', position: 'relative', zIndex: 3,
+      <nav style={{ width: 196, flex: 'none', position: 'relative', zIndex: 3,
         background: 'var(--bg)', display: 'flex', flexDirection: 'column',
         boxShadow: '3px 0 6px rgba(25,23,21,0.10), 14px 0 30px rgba(25,23,21,0.16)' }}>
         <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--n300)',
@@ -1218,9 +1548,9 @@ function AppInner({ email, onLogout }) {
         </div>
 
         <div style={{ marginTop: 'auto', borderTop: '1px solid var(--n300)', padding: '14px 18px',
-          display: 'grid', gap: 8 }}>
+          display: 'grid', gap: 9 }}>
           <span className="eg-label">Signed in</span>
-          <span style={{ fontSize: 12.5, lineHeight: 1.3, wordBreak: 'break-all' }}>{email}</span>
+          <span style={{ fontSize: 13.5, lineHeight: 1.35, wordBreak: 'break-all' }}>{email}</span>
           <button className="eg-link" style={{ justifySelf: 'start' }} onClick={onLogout}>
             Log out
           </button>
@@ -1229,24 +1559,27 @@ function AppInner({ email, onLogout }) {
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '0 24px',
-          height: 56, flex: 'none', background: 'var(--surface)', position: 'relative', zIndex: 2,
+          height: 64, flex: 'none', background: 'var(--surface)', position: 'relative', zIndex: 2,
           boxShadow: '0 1px 0 var(--n400), 0 3px 8px rgba(25,23,21,0.07)' }}>
-          <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: '0.02em',
+          <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: '0.01em',
             textTransform: 'uppercase' }}>{heading[0]}</span>
-          <span style={{ fontSize: 12, color: 'var(--n600)' }}>{heading[1]}</span>
+          <span style={{ fontSize: 13.5, color: 'var(--n600)' }}>{heading[1]}</span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span className="eg-mono" style={{ fontSize: 11, letterSpacing: '0.08em',
+            <span className="eg-mono" style={{ fontSize: 12, letterSpacing: '0.08em',
               textTransform: 'uppercase', color: 'var(--n600)' }}>
               session {sessionId}
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 8,
-              border: '1px solid var(--n400)', padding: '5px 10px', fontFamily: 'var(--mono)',
-              fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+              border: '1px solid var(--n400)', padding: '6px 11px', fontFamily: 'var(--sans)',
+              fontSize: 11.5, fontWeight: 700, letterSpacing: '0.04em',
+              textTransform: 'uppercase' }}>
               <span style={{ width: 7, height: 7, flex: 'none', background: 'var(--accent)' }} />
               live
             </span>
-            <button className="eg-ghost" onClick={resetSession}>Reset session</button>
+            <button className="eg-ghost" style={{ textTransform: 'none', fontSize: 13,
+              letterSpacing: 0, padding: '7px 14px' }}
+              onClick={resetSession}>Reset session</button>
           </div>
         </header>
 
@@ -1272,19 +1605,9 @@ function AppInner({ email, onLogout }) {
             flexDirection: 'column', background: 'var(--surface)' }}>
             {view === 'trace' && <TraceScreen refreshTrigger={graphRefresh} />}
             {view === 'documents' && (
-              <PendingScreen
-                title="Documents"
-                body="Ingested PDFs and URLs will list here with how many nodes each one wrote into the graph."
-                endpoint="GET /api/documents"
-              />
+              <DocumentsScreen onIngest={() => setGraphRefresh(p => p + 1)} />
             )}
-            {view === 'sessions' && (
-              <PendingScreen
-                title="Sessions"
-                body="Past conversations will list here, each showing what it added to the graph."
-                endpoint="GET /api/sessions"
-              />
-            )}
+            {view === 'sessions' && <SessionsScreen refreshTrigger={graphRefresh} />}
           </div>
         )}
       </div>

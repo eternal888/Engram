@@ -55,6 +55,7 @@ async def upload_pdf(
         text=extract["text"],
         document_name=file.filename,
         document_source="upload",
+        page_count=extract["page_count"],
     )
     if result["error"]:
         raise HTTPException(status_code=500, detail=result["error"])
@@ -88,6 +89,7 @@ def ingest_url(
         document_source="url",
         source_url=str(request.url),
         scrub_entities=PUBLIC_DOC_ENTITIES,
+        page_count=1,
     )
     if result["error"]:
         raise HTTPException(status_code=500, detail=result["error"])

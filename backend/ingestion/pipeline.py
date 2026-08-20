@@ -32,6 +32,7 @@ def ingest_text(
     document_source: str,  # "upload" | "url"
     source_url: str = None,
     scrub_entities: list = None,
+    page_count: int = 0,
 ) -> dict:
     """
     Full ingestion pipeline for a chunk of raw text.
@@ -76,6 +77,7 @@ def ingest_text(
                 document_name: $document_name,
                 document_source: $document_source,
                 source_url: $source_url,
+                page_count: $page_count,
                 chunk_index: $chunk_index,
                 total_chunks: $total_chunks,
                 word_count: $word_count,
@@ -93,6 +95,7 @@ def ingest_text(
             "document_name": document_name,
             "document_source": document_source,
             "source_url": source_url or "",
+            "page_count": page_count,
             "chunk_index": chunk["index"],
             "total_chunks": total,
             "word_count": chunk["word_count"],
@@ -120,8 +123,13 @@ def ingest_text(
 
 
 def list_user_documents(user_id: str) -> list:
-    """Return one entry per unique document for this user."""
-    result = graph_client.run("""
+    """
+    Return one entry per unique document for this user.
+
+    Cypher groups implicitly by every non-aggregated field, so the min()
+    already collapses each document's chunks to a single row.
+    """
+    return graph_client.run("""
         MATCH (s:Source)
         WHERE s.user_id = $user_id
         RETURN s.document_id as document_id,
@@ -129,19 +137,10 @@ def list_user_documents(user_id: str) -> list:
                s.document_source as document_source,
                s.source_url as source_url,
                s.total_chunks as total_chunks,
+               coalesce(s.page_count, 0) as page_count,
                min(s.created_at) as created_at
         ORDER BY created_at DESC
         """, {"user_id": user_id})
-    # Neo4j returns one row per chunk here — dedupe by document_id
-    seen = set()
-    docs = []
-    for row in result:
-        did = row["document_id"]
-        if did in seen:
-            continue
-        seen.add(did)
-        docs.append(row)
-    return docs
 
 
 def delete_document(user_id: str, document_id: str) -> int:
