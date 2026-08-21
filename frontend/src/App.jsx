@@ -478,11 +478,57 @@ function StyleTokens() {
       .eg-auth-rail .sq.red{background:var(--accent)}
       .eg-auth-rail .sq.amber{background:#a9740c}
 
-      /* the demo needs width to make sense — below this it is dropped, not squashed */
+      .eg-auth-scrollhint{
+        display:none;margin:26px 0 0;padding-top:18px;border-top:1px solid var(--n300);
+        font-family:var(--sans);font-size:12.5px;font-weight:700;letter-spacing:0.04em;
+        text-transform:uppercase;color:var(--n700);
+      }
+      .eg-auth-scrollhint span{margin-right:8px}
+      @media (max-width:960px){ .eg-auth-scrollhint{display:block} }
+
+      /* ── narrow: the two columns stack, form first ── */
+      /* A visitor on a phone is the one who most needs the explanation, so the
+         demo stays. It runs down the page instead of beside the form. */
       @media (max-width:960px){
-        .eg-auth{grid-template-columns:1fr}
-        .eg-auth-try{display:none}
-        .eg-auth-form{box-shadow:none;padding:40px 24px;min-height:100vh}
+        .eg-auth{grid-template-columns:1fr;min-height:auto}
+        .eg-auth-form{
+          box-shadow:0 4px 8px rgba(25,23,21,0.08), 0 20px 40px rgba(25,23,21,0.10);
+          padding:36px 22px 34px;order:1;
+        }
+        .eg-auth-try{order:2;padding:30px 22px 44px;overflow:visible}
+        .eg-auth-inner{max-width:none}
+        .eg-auth-head{font-size:29px;margin:8px 0 12px}
+        .eg-auth-sub{font-size:14.5px;margin-bottom:20px}
+
+        /* the input and its button stop sharing a row — the button gets a tap target */
+        .eg-demo-entry{flex-direction:column;gap:8px}
+        .eg-demo-entry .eg-input{border-right:1px solid var(--n400)}
+        .eg-demo-entry .eg-send{padding:14px 0;width:100%}
+
+        .eg-demo-hintrow{min-height:0;margin-bottom:16px}
+        .eg-demo-samples{gap:6px}
+        .eg-demo-samples .eg-ghost{font-size:12px;padding:7px 10px}
+
+        /* a shorter band — at this width the layout holds fewer nodes anyway */
+        .eg-demo-viz{height:152px}
+        .eg-demo-affordance{font-size:9px;right:8px;bottom:6px}
+        .eg-demo-list{max-height:none}          /* the page scrolls, not the list */
+        .eg-demo-fact{padding:11px 13px;gap:10px;flex-wrap:wrap}
+        .eg-demo-resolve{width:100%;margin-top:8px;padding:9px 0}
+        .eg-demo-score{padding:11px 13px;gap:9px}
+        .eg-demo-score .t{min-width:0;flex-basis:100%;order:3}
+        .eg-demo-head{padding:10px 13px}
+        .eg-demo-foot{font-size:12px}
+
+        .eg-auth-rail{margin-top:30px}
+      }
+
+      /* narrower still: the form is what a returning user came for */
+      @media (max-width:420px){
+        .eg-auth-form{padding:30px 16px 28px}
+        .eg-auth-try{padding:26px 16px 40px}
+        .eg-auth-head{font-size:25px}
+        .eg-demo-viz{height:136px}
       }
 
       .eg-err{
@@ -559,6 +605,20 @@ const DEMO_SAMPLES = [
 /* Below this width the console cannot show two panes side by side, so the
    layout changes shape rather than shrinking. */
 const NARROW = '(max-width: 900px)'
+
+function useNarrowAuth() {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 960px)').matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 960px)')
+    const onChange = (e) => setNarrow(e.matches)
+    setNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
 
 function useNarrow() {
   const [narrow, setNarrow] = useState(
@@ -898,6 +958,7 @@ function DemoGraph({ facts, edges, focus, onFocus }) {
 }
 
 function AuthScreen({ onAuthed }) {
+  const narrowAuth = useNarrowAuth()
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -1253,6 +1314,12 @@ function AuthScreen({ onAuthed }) {
               {mode === 'login' ? 'Create one' : 'Log in'}
             </button>
           </div>
+
+          {narrowAuth && (
+            <p className="eg-auth-scrollhint">
+              <span aria-hidden="true">↓</span> Try it first — no account needed
+            </p>
+          )}
 
           <div className="eg-auth-rail">
             <div><span className="sq ink" /><span>Everything you say is kept as a fact you can read back.</span></div>
