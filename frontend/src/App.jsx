@@ -66,6 +66,65 @@ const clockTime = () =>
   new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
 /* ──────────────────────────────────────────────────────────────
+   Wordmark. Letters break out of a tilted block — reversed inside
+   it, dark outside. One instance per mount needs its own clip and
+   mask ids, or the second render inherits the first one's geometry.
+   ────────────────────────────────────────────────────────────── */
+const MARK_LETTERS = (
+  <>
+    <g transform="rotate(-1.5 33 45)">
+      <polygon points="10,12 55,8 56,20 21,22 22,38 47,36 48,47 22,49 23,68 57,70 56,81 9,78" />
+    </g>
+    <g transform="rotate(1.8 85 45)">
+      <polygon points="60,84 71,4 82,4 102,57 98,7 109,7 106,82 94,82 72,24 71,83" />
+    </g>
+    <g transform="rotate(-1 121 50)">
+      <polygon points="122,16 142,28 135,37 122,30 108,37 107,63 120,74 135,67 135,57 125,58 124,48 146,47 146,72 121,85 96,68 96,31" />
+    </g>
+    <g transform="rotate(2 166 45)">
+      <polygon points="146,6 182,10 185,36 164,40 188,84 175,85 154,42 157,82 145,80" />
+      <polygon points="157,20 174,22 174,30 157,32" />
+    </g>
+    <g transform="rotate(-2 211 45)">
+      <polygon points="186,80 208,2 220,3 237,79 225,79 214,22 199,81" />
+      <polygon points="195,50 224,48 224,58 195,59" />
+    </g>
+    <g transform="rotate(1.2 250 45)">
+      <polygon points="228,84 232,6 243,6 251,47 261,7 271,7 269,86 258,85 260,32 253,67 246,67 239,31 239,84" />
+    </g>
+  </>
+)
+
+let _markSeq = 0
+
+function Wordmark({ width = 148, ink = '#191715', face = '#fbf5e9', shadow = '#4a4132', depth = 10 }) {
+  const id = useMemo(() => `mk${++_markSeq}`, [])
+  const block = { x: 18, y: 16, width: 236, height: 58, transform: 'rotate(-3 136 45)' }
+
+  return (
+    <svg className="eg-mark" viewBox="2 -6 286 116" width={width} role="img" aria-label="engram">
+      <defs>
+        <clipPath id={`in-${id}`}><rect {...block} /></clipPath>
+        <mask id={`out-${id}`}>
+          <rect x="-80" y="-80" width="470" height="290" fill="#fff" />
+          <rect {...block} fill="#000" />
+        </mask>
+      </defs>
+
+      {/* offset shadow, cast by the whole silhouette rather than the block alone */}
+      <g transform={`translate(${depth},${depth})`}>
+        <rect {...block} fill={shadow} />
+        <g fill={shadow} mask={`url(#out-${id})`}>{MARK_LETTERS}</g>
+      </g>
+
+      <rect {...block} fill={ink} />
+      <g fill={ink} mask={`url(#out-${id})`}>{MARK_LETTERS}</g>
+      <g fill={face} clipPath={`url(#in-${id})`}>{MARK_LETTERS}</g>
+    </svg>
+  )
+}
+
+/* ──────────────────────────────────────────────────────────────
    Design tokens.
    ────────────────────────────────────────────────────────────── */
 function StyleTokens() {
@@ -95,24 +154,13 @@ function StyleTokens() {
         font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:0.06em;
         text-transform:uppercase;color:var(--n600);
       }
+      /* the kicker under the wordmark sits back so the mark leads */
+      .eg-kicker{
+        font-family:var(--sans);font-size:10px;font-weight:600;letter-spacing:0.22em;
+        text-transform:uppercase;color:var(--n600);
+      }
 
-      /* wordmark: italic type in a right-pointing chevron block */
-      .eg-mark{position:relative;display:inline-flex;isolation:isolate;padding:0 4px 4px 0}
-      .eg-mark .shadow{
-        position:absolute;top:0;left:0;right:4px;bottom:4px;z-index:1;
-        transform:translate(3px,3px);background:#4a4132;
-        clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%);
-      }
-      .eg-mark .block{
-        position:relative;z-index:2;display:inline-flex;align-items:center;height:34px;
-        padding:0 18px;background:var(--ink);color:var(--surface);
-        clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%);
-        background-image:linear-gradient(160deg,rgba(255,255,255,0.14),rgba(255,255,255,0) 45%,rgba(0,0,0,0.12));
-      }
-      .eg-mark .word{
-        font-family:var(--sans);font-weight:800;font-style:italic;font-size:18px;
-        letter-spacing:-0.035em;line-height:1;
-      }
+      .eg-mark{display:block;max-width:100%;height:auto}
 
       .eg-nav{
         display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
@@ -182,6 +230,170 @@ function StyleTokens() {
       .eg-memrow .acts{display:flex;gap:6px;opacity:0;transition:opacity 120ms ease}
       .eg-memrow:hover .acts,.eg-memrow:focus-within .acts{opacity:1}
 
+      /* ── auth screen: demo left, form right ── */
+      .eg-auth{min-height:100vh;display:grid;grid-template-columns:minmax(0,58fr) minmax(0,42fr)}
+      /* the demo sits on its own tone so it reads as a different layer */
+      .eg-auth{--paper:#fbf5e9;--demo-surface:#efe6d2}
+      .eg-auth-try{
+        position:relative;overflow-y:auto;background:var(--demo-surface);
+        display:flex;padding:44px 46px;
+      }
+      .eg-auth-grid{
+        position:absolute;inset:0;pointer-events:none;
+        background-image:
+          linear-gradient(to right, var(--grid) 1px, transparent 1px),
+          linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+        background-size:52px 52px;
+        -webkit-mask-image:radial-gradient(ellipse 80% 80% at 45% 45%, #000 50%, transparent 100%);
+        mask-image:radial-gradient(ellipse 80% 80% at 45% 45%, #000 50%, transparent 100%);
+      }
+      .eg-auth-inner{position:relative;z-index:1;width:100%;max-width:560px;margin:auto}
+      .eg-auth-head{
+        margin:10px 0 14px;font-size:38px;font-weight:800;letter-spacing:-0.035em;line-height:1.05;
+      }
+      .eg-auth-sub{
+        margin:0 0 24px;font-size:15px;line-height:1.6;color:var(--ink-dim);max-width:52ch;
+      }
+
+      /* fields are recessed rather than flat */
+      .eg-auth .eg-input{box-shadow:inset 0 2px 4px rgba(25,23,21,0.07)}
+      .eg-demo-entry{display:flex;gap:0;margin-bottom:10px}
+      .eg-demo-entry .eg-input{border-right:0}
+      .eg-demo-entry .eg-send{flex:none}
+
+      /* the warning and the try chips share one slot so nothing shifts */
+      .eg-demo-hintrow{min-height:26px;margin-bottom:20px;display:flex;align-items:center}
+      .eg-demo-samples{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+      .eg-demo-samples .eg-ghost{text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:500}
+      .eg-demo-warn{
+        margin:0;font-size:12.5px;line-height:1.4;color:#7d520a;
+        display:flex;align-items:center;gap:8px;
+      }
+      .eg-demo-warn::before{content:"";width:9px;height:9px;background:#a9740c;flex:none}
+
+      /* the record is a raised sheet: lit top edge, contact edge, cast shadow */
+      .eg-demo-store{
+        border:1px solid var(--n400);background:var(--paper);
+        box-shadow:0 1px 0 #fff inset, 0 2px 0 var(--n300), 0 18px 40px rgba(25,23,21,0.14);
+      }
+      .eg-demo-head{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:11px 16px;border-bottom:1px solid var(--n300);
+        background:linear-gradient(#fffdf7,#f6eede);
+      }
+      .eg-demo-viz{position:relative;height:184px;border-bottom:1px solid var(--n300)}
+      .eg-demo-canvas{position:absolute;inset:0}
+      .eg-demo-canvas canvas{display:block}
+      .eg-demo-affordance{
+        position:absolute;right:10px;bottom:8px;pointer-events:none;
+        font-family:var(--mono);font-size:9.5px;letter-spacing:0.08em;
+        text-transform:uppercase;color:var(--n500);
+      }
+      .eg-demo-empty{
+        position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
+        padding:0 20px;border-left:2px solid var(--n400);margin:22px 0 22px 20px;
+        pointer-events:none;
+      }
+      .eg-demo-empty p{margin:0;font-size:14px;line-height:1.5;color:var(--ink-dim)}
+      .eg-demo-empty p b{font-size:16px;color:var(--ink);font-weight:800;letter-spacing:-0.01em}
+      .eg-demo-empty p+p{margin-top:5px}
+
+      .eg-demo-list{max-height:164px;overflow-y:auto}
+      .eg-demo-fact{
+        position:relative;display:flex;gap:12px;align-items:flex-start;padding:12px 16px;
+        border-bottom:1px solid var(--n200);animation:egstamp 320ms ease both;
+        transition:background 140ms ease,box-shadow 140ms ease;
+      }
+      .eg-demo-fact[data-kind="conflict"]{background:#f6ecd6}
+      .eg-demo-fact[data-focus="true"]{background:var(--n200);box-shadow:inset 3px 0 0 var(--ink)}
+      .eg-demo-fact[data-kind="conflict"][data-focus="true"]{box-shadow:inset 3px 0 0 var(--accent)}
+      .eg-demo-fact[data-flash="true"]{animation:egpulse 900ms ease}
+      @keyframes egpulse{
+        0%{background:var(--n200)} 40%{background:var(--n200)} 100%{background:transparent}
+      }
+      .eg-demo-fact .mark{
+        width:10px;height:10px;flex:none;margin-top:5px;background:var(--ink);
+        transition:transform 140ms ease;
+      }
+      .eg-demo-fact[data-focus="true"] .mark{transform:scale(1.25)}
+      .eg-demo-fact .mark[data-kind="conflict"]{background:var(--accent)}
+      .eg-demo-fact .mark[data-kind="disputed"]{background:#a9740c}
+      .eg-demo-fact .mark[data-kind="retired"]{background:transparent;border:2px solid var(--n500)}
+      .eg-demo-fact p{margin:0;font-size:14px;line-height:1.5}
+      .eg-demo-fact p[data-retired="true"]{text-decoration:line-through;color:var(--n500)}
+      .eg-demo-fact .note{
+        display:block;margin-top:4px;font-size:10.5px;letter-spacing:0.1em;
+        text-transform:uppercase;color:var(--n600);
+      }
+      .eg-demo-fact .note[data-kind="conflict"]{color:var(--accent-700)}
+      .eg-demo-fact .note[data-kind="retired"]{color:var(--n500)}
+      .eg-demo-resolve{
+        flex:none;align-self:center;font-family:var(--sans);font-size:10.5px;font-weight:700;
+        letter-spacing:0.06em;text-transform:uppercase;padding:6px 10px;cursor:pointer;
+        background:transparent;border:1px solid var(--accent);color:var(--accent-700);
+        transition:background 140ms ease,color 140ms ease;
+      }
+      .eg-demo-resolve:hover{background:var(--accent);color:var(--surface)}
+      @keyframes egstamp{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+      .eg-demo-score{
+        padding:12px 16px;border-top:1px solid var(--n300);display:flex;align-items:center;
+        gap:11px;flex-wrap:wrap;background:linear-gradient(#f8f1e2,#f3ead6);
+      }
+      .eg-demo-score .n{
+        font-family:var(--mono);font-weight:700;font-size:17px;font-variant-numeric:tabular-nums;
+      }
+      .eg-demo-score .n[data-weak="true"]{color:var(--accent-700)}
+      .eg-demo-bar{display:flex;gap:2px}
+      .eg-demo-bar i{width:5px;height:13px;background:var(--n400);display:block}
+      .eg-demo-bar i[data-on="true"]{background:var(--ink)}
+      .eg-demo-bar i[data-on="true"][data-weak="true"]{background:var(--accent)}
+      .eg-demo-score .t{
+        font-size:11.5px;line-height:1.4;color:var(--n700);flex:1;min-width:180px;
+      }
+      .eg-demo-foot{
+        margin:16px 0 0;font-size:12.5px;line-height:1.6;color:var(--n700);max-width:52ch;
+      }
+
+      .eg-auth-form{
+        position:relative;z-index:2;background:var(--bg);display:flex;
+        padding:40px 46px;overflow-y:auto;
+        box-shadow:-4px 0 8px rgba(25,23,21,0.10), -22px 0 44px rgba(25,23,21,0.13);
+      }
+      .eg-auth-form > div{margin:auto}
+      .eg-auth-formhead{
+        margin:0 0 8px;font-size:29px;font-weight:800;letter-spacing:-0.03em;line-height:1.06;
+      }
+      .eg-auth-formsub{margin:0 0 26px;font-size:14.5px;line-height:1.55;color:var(--n700)}
+      /* the primary button physically depresses: its edge collapses as it moves down */
+      .eg-auth-go{
+        width:100%;padding:15px 18px;margin-top:24px;
+        display:flex;align-items:center;justify-content:space-between;
+        box-shadow:0 2px 0 #4a4132;transition:transform 90ms ease,box-shadow 90ms ease,
+          background 140ms ease,color 140ms ease;
+      }
+      .eg-auth-go:active:not(:disabled){transform:translateY(2px);box-shadow:0 0 0 #4a4132}
+
+      /* fills what was dead space under the form at tall viewports */
+      .eg-auth-rail{
+        margin-top:40px;padding-top:20px;border-top:1px solid var(--n300);display:grid;gap:12px;
+      }
+      .eg-auth-rail > div{
+        display:flex;gap:11px;align-items:flex-start;
+        font-size:12.5px;line-height:1.5;color:var(--n700);
+      }
+      .eg-auth-rail .sq{width:9px;height:9px;flex:none;margin-top:4px}
+      .eg-auth-rail .sq.ink{background:var(--ink)}
+      .eg-auth-rail .sq.red{background:var(--accent)}
+      .eg-auth-rail .sq.amber{background:#a9740c}
+
+      /* the demo needs width to make sense — below this it is dropped, not squashed */
+      @media (max-width:960px){
+        .eg-auth{grid-template-columns:1fr}
+        .eg-auth-try{display:none}
+        .eg-auth-form{box-shadow:none;padding:40px 24px;min-height:100vh}
+      }
+
       .eg-err{
         margin-top:14px;padding:10px 12px;font-family:var(--mono);font-size:12px;
         background:var(--accent-100);border:1px solid var(--accent);color:var(--accent-700);
@@ -196,7 +408,7 @@ function StyleTokens() {
       }
       @media (prefers-reduced-motion:reduce){
         .eg-caret{animation:none}
-        *{transition-duration:0ms !important}
+        *{transition-duration:1ms !important;animation-duration:1ms !important}
       }
     `}</style>
   )
@@ -204,13 +416,528 @@ function StyleTokens() {
 
 /* ──────────────────────────────────────────────────────────────
    Auth screen.
+
+   The left side is a working demo: type a fact, watch it enter a
+   store, then type something that conflicts with it. Everything
+   lives in component state and dies on refresh — which is the
+   point the copy makes about signing in. Nothing typed here is
+   ever sent anywhere.
+
+   Topic matching is deliberately crude. Two facts in the same
+   bucket that differ are treated as a conflict. Enough to show
+   the behaviour without pretending to be the real agent.
    ────────────────────────────────────────────────────────────── */
+const DEMO_STOP = new Set(['i','a','an','the','is','am','in','on','to','of','my',
+  'me','it','and','was','are','now','that','this'])
+
+const demoWords = (s) =>
+  s.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(w => w && !DEMO_STOP.has(w))
+
+const DEMO_TOPICS = [
+  ['deadline','due','ship','launch','march','june','july','august','date','deadlines'],
+  ['boca','raton','london','berlin','lisbon','city','based','moved','live','lives'],
+  ['work','job','company','team','role','engineer','founder','logistics'],
+  ['python','rust','typescript','go','postgres','stack','prefer','prefers'],
+]
+
+const topicOf = (text) => {
+  const ws = demoWords(text)
+  return DEMO_TOPICS.findIndex(g => g.some(w => ws.includes(w)))
+}
+
+/* A node label is a name, not a sentence. Drop filler, keep up to three
+   content words, truncate only as a fallback. */
+const LABEL_DROP = new Set([...DEMO_STOP,
+  'actually','just','really','very','quite','currently','live','lives','living',
+  'at','for','with','be','been','being','has','have','had','will','would',
+  'about','from','but','so','then','also','still','maybe','think','guess'])
+
+const shortLabel = (text) => {
+  const kept = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/)
+    .filter(w => w && !LABEL_DROP.has(w))
+  const name = (kept.length ? kept.slice(0, 3) : text.split(/\s+/)).join(' ').toUpperCase()
+  return name.length > 20 ? name.slice(0, 19) + '…' : name
+}
+
+const DEMO_SAMPLES = [
+  'I live in Boca Raton',
+  'The deadline is in March',
+  'Actually the deadline moved to June',
+]
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/* ──────────────────────────────────────────────────────────────
+   The canvas. Owns physics and drawing only — every piece of
+   truth (which facts exist, what is focused) comes in as a prop,
+   so the graph and the record can never disagree.
+   ────────────────────────────────────────────────────────────── */
+function DemoGraph({ facts, edges, focus, onFocus }) {
+  const hostRef = useRef(null)
+  const canvasRef = useRef(null)
+  const simRef = useRef({ nodes: [], edges: [] })
+  const viewRef = useRef({ focus: null, hover: null, drag: null })
+  const loopRef = useRef({ raf: 0, energy: 1 })
+  const focusRef = useRef(onFocus)
+
+  focusRef.current = onFocus
+  viewRef.current.focus = focus
+
+  // keep the simulation in step with the facts
+  useEffect(() => {
+    const host = hostRef.current
+    const W = host ? host.clientWidth : 420
+    const H = host ? host.clientHeight : 184
+    const sim = simRef.current
+    const reduced = prefersReducedMotion()
+
+    while (sim.nodes.length < facts.length) {
+      const i = sim.nodes.length
+      const angle = i * 2.39996
+      const radius = 22 + Math.sqrt(i + 1) * 20
+      sim.nodes.push({
+        id: facts[i].id, label: shortLabel(facts[i].text),
+        deg: 0, vx: 0, vy: 0, born: reduced ? 0 : performance.now(),
+        x: W / 2 + Math.cos(angle) * radius,
+        y: H / 2 + Math.sin(angle) * radius * 0.8,
+      })
+    }
+    if (sim.nodes.length > facts.length) sim.nodes.length = facts.length
+
+    sim.nodes.forEach((n, i) => {
+      const f = facts[i]
+      if (!f) return
+      n.conflict = !!f.conflict
+      n.retired = !!f.retired
+      n.disputed = !!f.superseded && !f.retired
+    })
+
+    sim.edges = edges.map(e => ({ ...e }))
+    sim.nodes.forEach(n => { n.deg = 0 })
+    for (const e of sim.edges) {
+      if (sim.nodes[e.a]) sim.nodes[e.a].deg++
+      if (sim.nodes[e.b]) sim.nodes[e.b].deg++
+    }
+    loopRef.current.energy = 1
+  }, [facts, edges])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const host = hostRef.current
+    if (!canvas || !host) return
+    const ctx = canvas.getContext('2d')
+    let W = 0, H = 0
+
+    const radiusOf = (n) => (9 + n.deg * 1.8) * (n.retired ? 0.72 : 1)
+
+    const resize = () => {
+      W = host.clientWidth; H = host.clientHeight
+      const d = Math.min(window.devicePixelRatio || 1, 2)
+      canvas.width = Math.round(W * d); canvas.height = Math.round(H * d)
+      canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
+      ctx.setTransform(d, 0, 0, d, 0, 0)
+      loopRef.current.energy = 1
+    }
+
+    const step = () => {
+      const ns = simRef.current.nodes
+      const n = ns.length
+      if (!n) return 0
+      const rest = Math.max(52, Math.min(96, Math.sqrt((W * H) / n) * 0.66))
+      const dragId = viewRef.current.drag
+
+      for (let i = 0; i < n; i++) {
+        const a = ns[i]
+        for (let j = i + 1; j < n; j++) {
+          const b = ns[j]
+          const dx = b.x - a.x, dy = b.y - a.y
+          const d2 = dx * dx + dy * dy || 0.01
+          const d = Math.sqrt(d2)
+          const f = (rest * rest * 1.4) / d2 / d
+          a.vx -= dx * f; a.vy -= dy * f; b.vx += dx * f; b.vy += dy * f
+          if (d < 40) {
+            const p = ((40 - d) / d) * 0.5
+            a.vx -= dx * p; a.vy -= dy * p; b.vx += dx * p; b.vy += dy * p
+          }
+        }
+      }
+      for (const e of simRef.current.edges) {
+        const a = ns[e.a], b = ns[e.b]
+        if (!a || !b) continue
+        const dx = b.x - a.x, dy = b.y - a.y
+        const d = Math.hypot(dx, dy) || 0.01
+        const f = (d - rest) * 0.014
+        a.vx += (dx / d) * f; a.vy += (dy / d) * f
+        b.vx -= (dx / d) * f; b.vy -= (dy / d) * f
+      }
+
+      let energy = 0
+      for (const p of ns) {
+        if (p.id === dragId) { p.vx = 0; p.vy = 0; continue }   // held still by the pointer
+        p.vx += (W / 2 - p.x) * 0.0026
+        p.vy += (H / 2 - p.y) * 0.0032
+        p.vx *= 0.85; p.vy *= 0.85
+        p.x += p.vx; p.y += p.vy
+        const m = 26
+        p.x = Math.max(m, Math.min(W - m, p.x))
+        p.y = Math.max(m, Math.min(H - m, p.y))
+        energy += Math.abs(p.vx) + Math.abs(p.vy)
+      }
+      return energy / n
+    }
+
+    const draw = () => {
+      const { nodes: ns, edges: es } = simRef.current
+      const now = performance.now()
+      const focusId = viewRef.current.focus
+      ctx.clearRect(0, 0, W, H)
+
+      // everything one hop from the focused node stays lit
+      let near = null
+      if (focusId != null) {
+        near = new Set([focusId])
+        for (const e of es) {
+          const a = ns[e.a], b = ns[e.b]
+          if (!a || !b) continue
+          if (a.id === focusId) near.add(b.id)
+          if (b.id === focusId) near.add(a.id)
+        }
+      }
+      const dim = (id) => (near && !near.has(id) ? 0.22 : 1)
+
+      for (const e of es) {
+        const a = ns[e.a], b = ns[e.b]
+        if (!a || !b) continue
+        const lit = near ? (near.has(a.id) && near.has(b.id)) : false
+        ctx.save()
+        ctx.globalAlpha = Math.min(dim(a.id), dim(b.id))
+        if (e.conflict) {
+          ctx.strokeStyle = 'rgba(240,31,10,0.8)'
+          ctx.setLineDash([5, 4]); ctx.lineWidth = lit ? 2.2 : 1.6
+        } else if (e.resolved) {
+          ctx.strokeStyle = 'rgba(240,31,10,0.55)'; ctx.lineWidth = lit ? 2.4 : 1.8
+        } else {
+          ctx.strokeStyle = 'rgba(92,83,68,0.4)'; ctx.lineWidth = lit ? 2 : 1.2
+        }
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+        ctx.restore()
+      }
+
+      ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace'
+      ctx.textBaseline = 'middle'
+      // seed occupancy with the discs so a label can never land on a node
+      const taken = ns.map(p => {
+        const r = radiusOf(p)
+        return { x: p.x - r - 2, y: p.y - r - 2, w: r * 2 + 4, h: r * 2 + 4 }
+      })
+      const hits = (b) => taken.some(p =>
+        b.x < p.x + p.w && b.x + b.w > p.x && b.y < p.y + p.h && b.y + b.h > p.y)
+
+      const order = focusId != null
+        ? [...ns].sort((a, b) => (a.id === focusId ? 1 : 0) - (b.id === focusId ? 1 : 0))
+        : ns
+
+      for (const p of order) {
+        const r = radiusOf(p)
+        const age = p.born ? Math.min(1, (now - p.born) / 520) : 1
+        const ease = 1 - Math.pow(1 - age, 3)
+        const isFocus = p.id === focusId
+
+        ctx.save()
+        ctx.globalAlpha = (0.3 + ease * 0.7) * dim(p.id)
+        if (age < 1) {
+          ctx.strokeStyle = p.conflict ? 'rgba(240,31,10,0.5)' : 'rgba(124,114,89,0.45)'
+          ctx.lineWidth = 1.4
+          ctx.beginPath(); ctx.arc(p.x, p.y, r + (1 - ease) * 24 + 4, 0, 7); ctx.stroke()
+        }
+        if (p.conflict) {
+          ctx.fillStyle = 'rgba(240,31,10,0.16)'
+          ctx.beginPath(); ctx.arc(p.x, p.y, r + 7, 0, 7); ctx.fill()
+        }
+
+        ctx.beginPath(); ctx.arc(p.x, p.y, r * (0.6 + ease * 0.4), 0, 7)
+        if (p.retired) {
+          ctx.fillStyle = '#f4ecdc'; ctx.fill()
+          ctx.strokeStyle = '#a2957c'; ctx.lineWidth = 1.6; ctx.stroke()
+        } else {
+          ctx.fillStyle = p.conflict ? '#f01f0a' : p.disputed ? '#a9740c' : '#191715'
+          ctx.fill()
+        }
+        if (isFocus) {
+          ctx.strokeStyle = p.conflict ? '#a81400' : '#191715'
+          ctx.lineWidth = 1.4
+          ctx.beginPath(); ctx.arc(p.x, p.y, r + 6, 0, 7); ctx.stroke()
+        }
+        ctx.restore()
+
+        const name = p.label
+        const tw = ctx.measureText(name).width
+        const gap = r + 8
+        const spots = [
+          [p.x + gap, p.y], [p.x - gap - tw, p.y],
+          [p.x - tw / 2, p.y - gap - 5], [p.x - tw / 2, p.y + gap + 5],
+        ]
+        let placed = false
+        for (const [x, y] of spots) {
+          if (x < 5 || x + tw > W - 5 || y < 9 || y > H - 9) continue
+          const box = { x: x - 3, y: y - 7, w: tw + 6, h: 14 }
+          if (hits(box) && !isFocus) continue
+          taken.push(box)
+          ctx.save()
+          ctx.globalAlpha = (0.25 + ease * 0.75) * dim(p.id)
+          ctx.fillStyle = '#fffdf7'
+          ctx.fillRect(box.x, box.y, box.w, box.h)
+          ctx.fillStyle = p.retired ? '#a2957c' : p.conflict ? '#a81400' : '#332e26'
+          ctx.fillText(name, x, y)
+          ctx.restore()
+          placed = true
+          break
+        }
+        // whatever is being pointed at is always named
+        if (!placed && isFocus) {
+          const x = Math.max(5, Math.min(W - tw - 5, p.x + gap))
+          ctx.save()
+          ctx.fillStyle = '#fffdf7'; ctx.fillRect(x - 3, p.y - 7, tw + 6, 14)
+          ctx.fillStyle = p.conflict ? '#a81400' : '#332e26'
+          ctx.fillText(name, x, p.y)
+          ctx.restore()
+        }
+      }
+    }
+
+    const frame = () => {
+      loopRef.current.raf = requestAnimationFrame(frame)
+      if (loopRef.current.energy > 0.05) loopRef.current.energy = step()
+      draw()
+    }
+
+    const at = (evt) => {
+      const r = canvas.getBoundingClientRect()
+      return { x: evt.clientX - r.left, y: evt.clientY - r.top }
+    }
+    const pick = (evt) => {
+      const { x, y } = at(evt)
+      for (const p of simRef.current.nodes) {
+        const r = radiusOf(p) + 10
+        if ((p.x - x) ** 2 + (p.y - y) ** 2 <= r * r) return p
+      }
+      return null
+    }
+
+    const onMove = (e) => {
+      const v = viewRef.current
+      if (v.drag != null) {
+        const { x, y } = at(e)
+        const node = simRef.current.nodes.find(n => n.id === v.drag)
+        if (node) { node.x = x; node.y = y; node.vx = 0; node.vy = 0 }
+        loopRef.current.energy = 1
+        return
+      }
+      const hit = pick(e)
+      const id = hit ? hit.id : null
+      canvas.style.cursor = hit ? 'grab' : 'default'
+      if (id !== v.hover) { v.hover = id; focusRef.current(id) }
+    }
+    const onLeave = () => {
+      const v = viewRef.current
+      if (v.drag != null) return
+      if (v.hover !== null) { v.hover = null; focusRef.current(null) }
+      canvas.style.cursor = 'default'
+    }
+    const onDown = (e) => {
+      const hit = pick(e)
+      if (!hit) return
+      viewRef.current.drag = hit.id
+      canvas.style.cursor = 'grabbing'
+      focusRef.current(hit.id)
+      e.preventDefault()
+    }
+    // released on window, so letting go outside the canvas still lands
+    const onUp = () => {
+      if (viewRef.current.drag == null) return
+      viewRef.current.drag = null
+      canvas.style.cursor = 'default'
+      loopRef.current.energy = 1
+    }
+
+    const ro = new ResizeObserver(resize)
+    ro.observe(host)
+    resize()
+    canvas.addEventListener('mousemove', onMove)
+    canvas.addEventListener('mouseleave', onLeave)
+    canvas.addEventListener('mousedown', onDown)
+    window.addEventListener('mouseup', onUp)
+    loopRef.current.raf = requestAnimationFrame(frame)
+
+    return () => {
+      cancelAnimationFrame(loopRef.current.raf)
+      ro.disconnect()
+      canvas.removeEventListener('mousemove', onMove)
+      canvas.removeEventListener('mouseleave', onLeave)
+      canvas.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  return (
+    <div ref={hostRef} className="eg-demo-canvas">
+      <canvas ref={canvasRef} />
+    </div>
+  )
+}
+
 function AuthScreen({ onAuthed }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // ── the demo store ──
+  // Facts are kept oldest-first so a fact's index is also its node index.
+  const [draft, setDraft] = useState('')
+  const [facts, setFacts] = useState([])
+  const [edges, setEdges] = useState([])
+  const [focus, setFocus] = useState(null)
+  const [flash, setFlash] = useState(null)
+  const [shown, setShown] = useState(null)      // the tweened score
+  const nextId = useRef(1)
+  const inputRef = useRef(null)
+  const listRef = useRef(null)
+  const rowRefs = useRef(new Map())
+
+  const live = facts.filter(f => !f.retired)
+  const conflicts = live.filter(f => f.conflict).length
+  const target = live.length === 0 ? null : Math.max(48, 100 - conflicts * 39)
+
+  // ── the draft is checked against the store on every keystroke ──
+  const candidate = (() => {
+    const text = draft.trim()
+    if (!text) return null
+    const t = topicOf(text)
+    if (t < 0) return null
+    return facts.find(f => !f.retired && !f.conflict && f.topic === t &&
+      f.text.trim().toLowerCase() !== text.toLowerCase()) || null
+  })()
+
+  const commit = (raw) => {
+    const text = (raw || '').trim()
+    if (!text) return
+
+    const already = facts.find(f => f.text.toLowerCase() === text.toLowerCase())
+    if (already) {
+      setDraft(''); setFocus(already.id); setFlash(already.id)
+      window.setTimeout(() => setFlash(null), 900)
+      inputRef.current?.focus()
+      return
+    }
+
+    const topic = topicOf(text)
+    const next = facts.map(f => ({ ...f }))
+    const idx = next.length
+    const id = nextId.current++
+
+    // conflict against the most recent unresolved fact on the same topic
+    let conflictIdx = -1
+    for (let i = next.length - 1; i >= 0; i--) {
+      if (next[i].conflict || next[i].superseded || next[i].retired) continue
+      if (topic >= 0 && next[i].topic === topic) { conflictIdx = i; break }
+    }
+
+    const fact = { id, text, topic, conflict: conflictIdx >= 0, pairedWith: null,
+      superseded: false, retired: false, resolved: false }
+
+    if (conflictIdx >= 0) {
+      next[conflictIdx].superseded = true
+      // both sides know their partner, so resolving later needs no re-detection
+      next[conflictIdx].pairedWith = id
+      fact.pairedWith = next[conflictIdx].id
+    }
+    next.push(fact)
+
+    let link = conflictIdx
+    if (link < 0) {
+      for (let i = idx - 1; i >= 0; i--) {
+        if (topic >= 0 && next[i].topic === topic) { link = i; break }
+      }
+    }
+    if (link < 0 && idx > 0) link = idx - 1
+
+    setFacts(next)
+    if (link >= 0) {
+      setEdges(es => [...es, { a: link, b: idx, conflict: conflictIdx >= 0, resolved: false }])
+    }
+    setDraft('')
+    inputRef.current?.focus()
+  }
+
+  const resolve = (id) => {
+    setFacts(fs => fs.map(f => {
+      if (f.id === id) return { ...f, conflict: false, resolved: true }
+      const winner = fs.find(x => x.id === id)
+      if (winner && f.id === winner.pairedWith) {
+        return { ...f, retired: true, superseded: false }
+      }
+      return f
+    }))
+    setEdges(es => es.map(e => (e.conflict ? { ...e, conflict: false, resolved: true } : e)))
+  }
+
+  const forgetAll = () => {
+    setFacts([]); setEdges([]); setFocus(null); setDraft('')
+    rowRefs.current.clear()
+    setShown(null)
+    inputRef.current?.focus()
+  }
+
+  // ── score tween: step toward the target rather than snapping ──
+  useEffect(() => {
+    if (target === null) { setShown(null); return }
+    if (shown === null) { setShown(target); return }
+    if (shown === target) return
+    if (prefersReducedMotion()) { setShown(target); return }
+    let raf = 0
+    const tick = () => {
+      setShown(cur => {
+        if (cur === null || cur === target) return target
+        const delta = target - cur
+        const stepBy = Math.ceil(Math.abs(delta) / 6) * Math.sign(delta)
+        const nextVal = cur + stepBy
+        return (delta > 0 ? nextVal >= target : nextVal <= target) ? target : nextVal
+      })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, shown])
+
+  // ── keep the focused row in view, without scrolling the page ──
+  useEffect(() => {
+    if (focus == null) return
+    const list = listRef.current
+    const row = rowRefs.current.get(focus)
+    if (!list || !row) return
+    const top = row.offsetTop
+    const bottom = top + row.offsetHeight
+    if (top < list.scrollTop) list.scrollTop = top
+    else if (bottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = bottom - list.clientHeight
+    }
+  }, [focus])
+
+  const weak = shown !== null && shown < 70
+  const filled = shown === null ? 0 : Math.round(shown / 10)
+
+  const scoreNote =
+    target === null
+      ? 'Nothing to check an answer against yet.'
+      : conflicts > 0
+        ? `Two of them can't both be true, so an answer drawing on them can't be fully traced.`
+        : live.length === 1
+          ? 'An answer drawing on this could be traced straight back to it.'
+          : 'An answer drawing on these could be traced back to every one of them.'
 
   const submit = async () => {
     setError('')
@@ -242,55 +969,189 @@ function AuthScreen({ onAuthed }) {
     }
   }
 
+  const noteFor = (f) =>
+    f.retired ? 'retired · superseded by a newer fact'
+    : f.conflict ? 'conflicts with an earlier fact · both kept'
+    : f.resolved ? 'confirmed current · traceable'
+    : f.superseded ? 'held, but now disputed'
+    : 'stored · traceable'
+
+  const kindFor = (f) =>
+    f.retired ? 'retired' : f.conflict ? 'conflict' : f.superseded ? 'disputed' : 'stored'
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', padding: 24, background: 'var(--bg)' }}>
-      <div style={{ width: '100%', maxWidth: 380 }}>
-        <div style={{ display: 'grid', gap: 10, justifyItems: 'start', marginBottom: 30 }}>
-          <span className="eg-mark">
-            <span className="shadow" />
-            <span className="block"><span className="word">engram</span></span>
-          </span>
-          <span className="eg-label">Memory layer</span>
+    <div className="eg-auth">
+      {/* ── left: try it before signing in ── */}
+      <section className="eg-auth-try">
+        <div className="eg-auth-grid" />
+        <div className="eg-auth-inner">
+          <span className="eg-kicker">Before you sign in</span>
+          <h1 className="eg-auth-head">Tell it something.<br />It won't forget.</h1>
+          <p className="eg-auth-sub">
+            Engram is a memory layer for AI. Whatever you type becomes a fact it holds
+            and links to what it already knows — and every answer it gives later is
+            checked against that record, not invented.
+          </p>
+
+          <div className="eg-demo-entry">
+            <input
+              ref={inputRef}
+              className="eg-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && commit(draft)}
+              placeholder="I live in Boca Raton"
+              aria-label="Add a fact"
+            />
+            <button className="eg-send" onClick={() => commit(draft)}>Remember it</button>
+          </div>
+
+          {/* the warning and the chips share this slot, so nothing shifts */}
+          <div className="eg-demo-hintrow">
+            {candidate ? (
+              <p className="eg-demo-warn">
+                This will conflict with “{candidate.text}” — both get kept.
+              </p>
+            ) : (
+              <div className="eg-demo-samples">
+                <span className="eg-kicker">Try</span>
+                {DEMO_SAMPLES.map(sample => (
+                  <button key={sample} className="eg-ghost" onClick={() => commit(sample)}>
+                    {sample}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="eg-demo-store">
+            <div className="eg-demo-head">
+              <span className="eg-label" style={{ color: 'var(--ink)' }}>What it now holds</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span className="eg-mono" style={{ fontSize: 11, color: 'var(--n600)' }}>
+                  {live.length === 0
+                    ? 'empty'
+                    : `${live.length} ${live.length === 1 ? 'fact' : 'facts'}`}
+                </span>
+                {facts.length > 0 && (
+                  <button className="eg-link" onClick={forgetAll}>Forget all</button>
+                )}
+              </span>
+            </div>
+
+            <div className="eg-demo-viz">
+              <DemoGraph facts={facts} edges={edges} focus={focus} onFocus={setFocus} />
+              {facts.length === 0 ? (
+                <div className="eg-demo-empty">
+                  <p><b>Nothing stored yet.</b></p>
+                  <p>Add a fact, then add one that contradicts it.</p>
+                </div>
+              ) : (
+                <span className="eg-demo-affordance">hover to trace · drag to move</span>
+              )}
+            </div>
+
+            {facts.length > 0 && (
+              <div className="eg-demo-list" ref={listRef}>
+                {[...facts].reverse().map((f) => (
+                  <div
+                    key={f.id}
+                    ref={(el) => { if (el) rowRefs.current.set(f.id, el)
+                                   else rowRefs.current.delete(f.id) }}
+                    className="eg-demo-fact"
+                    data-kind={kindFor(f)}
+                    data-focus={focus === f.id}
+                    data-flash={flash === f.id}
+                    onMouseEnter={() => setFocus(f.id)}
+                    onMouseLeave={() => setFocus(null)}
+                  >
+                    <span className="mark" data-kind={kindFor(f)} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p data-retired={f.retired}>{f.text}</p>
+                      <span className="note" data-kind={kindFor(f)}>{noteFor(f)}</span>
+                    </div>
+                    {f.conflict && (
+                      <button className="eg-demo-resolve" onClick={() => resolve(f.id)}>
+                        This one is current
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="eg-demo-score">
+              <span className="n" data-weak={weak}>{shown === null ? '—' : `${shown}%`}</span>
+              <span className="eg-demo-bar">
+                {Array.from({ length: 10 }, (_, i) => (
+                  <i key={i} data-on={i < filled} data-weak={weak} />
+                ))}
+              </span>
+              <span className="t">{scoreNote}</span>
+            </div>
+          </div>
+
+          <p className="eg-demo-foot">
+            This one runs in your browser and forgets on refresh. Log in and the same
+            record persists for months, across every session.
+          </p>
         </div>
+      </section>
 
-        <h1 style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 700, letterSpacing: '-0.02em' }}>
-          {mode === 'login' ? 'Open your graph' : 'Start a graph'}
-        </h1>
-        <p className="eg-mono" style={{ margin: '0 0 26px', fontSize: 12, color: 'var(--n600)' }}>
-          {mode === 'login'
-            ? 'Everything you told it is still there.'
-            : 'Nothing is stored until you say something.'}
-        </p>
+      {/* ── right: the form ── */}
+      <section className="eg-auth-form">
+        <div style={{ width: '100%', maxWidth: 340 }}>
+          <div style={{ display: 'grid', gap: 10, justifyItems: 'start', marginBottom: 36 }}>
+            <Wordmark width={230} depth={9} />
+            <span className="eg-kicker">Memory layer</span>
+          </div>
 
-        <label className="eg-label" style={{ display: 'block', marginBottom: 6 }}>Email</label>
-        <input className="eg-input" style={{ width: '100%' }} type="email" value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder="you@example.com" disabled={loading} />
+          <h2 className="eg-auth-formhead">
+            {mode === 'login' ? 'Open your graph' : 'Start a graph'}
+          </h2>
+          <p className="eg-auth-formsub">
+            {mode === 'login'
+              ? 'Everything you told it is still there.'
+              : 'Nothing is stored until you say something. Then it stays.'}
+          </p>
 
-        <label className="eg-label" style={{ display: 'block', margin: '16px 0 6px' }}>Password</label>
-        <input className="eg-input" style={{ width: '100%' }} type="password" value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder={mode === 'register' ? 'at least 8 characters' : '••••••••'}
-          disabled={loading} />
+          <label className="eg-label" style={{ display: 'block', marginBottom: 6 }}>Email</label>
+          <input className="eg-input" style={{ width: '100%' }} type="email" value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            placeholder="you@example.com" disabled={loading} />
 
-        {error && <div className="eg-err">{error}</div>}
+          <label className="eg-label" style={{ display: 'block', margin: '16px 0 6px' }}>
+            Password
+          </label>
+          <input className="eg-input" style={{ width: '100%' }} type="password" value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            placeholder={mode === 'register' ? 'at least 8 characters' : '••••••••'}
+            disabled={loading} />
 
-        <button className="eg-send" style={{ width: '100%', padding: '14px 0', marginTop: 22 }}
-          onClick={submit} disabled={loading}>
-          {loading ? 'Working' : mode === 'login' ? 'Log in' : 'Create account'}
-        </button>
+          {error && <div className="eg-err">{error}</div>}
 
-        <div className="eg-mono" style={{ marginTop: 18, fontSize: 12, color: 'var(--n600)' }}>
-          {mode === 'login' ? 'No account yet?' : 'Already have one?'}
-          <button className="eg-link" style={{ marginLeft: 8 }}
-            onClick={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login') }}>
-            {mode === 'login' ? 'Create one' : 'Log in'}
+          <button className="eg-send eg-auth-go" onClick={submit} disabled={loading}>
+            <span>{loading ? 'Working' : mode === 'login' ? 'Log in' : 'Create account'}</span>
+            <span aria-hidden="true">→</span>
           </button>
+
+          <div className="eg-mono" style={{ marginTop: 20, fontSize: 12, color: 'var(--n600)' }}>
+            {mode === 'login' ? 'No account yet?' : 'Already have one?'}
+            <button className="eg-link" style={{ marginLeft: 8 }}
+              onClick={() => { setError(''); setMode(mode === 'login' ? 'register' : 'login') }}>
+              {mode === 'login' ? 'Create one' : 'Log in'}
+            </button>
+          </div>
+
+          <div className="eg-auth-rail">
+            <div><span className="sq ink" /><span>Everything you say is kept as a fact you can read back.</span></div>
+            <div><span className="sq red" /><span>Contradictions are held, never quietly overwritten.</span></div>
+            <div><span className="sq amber" /><span>Every answer shows how much of it came from your own record.</span></div>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   )
 }
@@ -1528,11 +2389,8 @@ function AppInner({ email, onLogout }) {
         boxShadow: '3px 0 6px rgba(25,23,21,0.10), 14px 0 30px rgba(25,23,21,0.16)' }}>
         <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--n300)',
           display: 'grid', gap: 9, justifyItems: 'start' }}>
-          <span className="eg-mark">
-            <span className="shadow" />
-            <span className="block"><span className="word">engram</span></span>
-          </span>
-          <span className="eg-label">Memory layer</span>
+          <Wordmark width={148} />
+          <span className="eg-kicker">Memory layer</span>
         </div>
 
         <div style={{ padding: '8px 0' }}>
