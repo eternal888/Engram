@@ -214,6 +214,97 @@ function StyleTokens() {
       .eg-link:hover{color:var(--ink)}
       .eg-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 
+      /* ── shell ── */
+      .eg-shell{height:100vh;display:flex;background:var(--bg)}
+      .eg-rail{
+        width:196px;flex:none;position:relative;z-index:3;background:var(--bg);
+        display:flex;flex-direction:column;
+        box-shadow:3px 0 6px rgba(25,23,21,0.10),14px 0 30px rgba(25,23,21,0.16);
+      }
+      .eg-rail-brand{padding:18px 18px 16px;border-bottom:1px solid var(--n300);
+        display:grid;gap:9px;justify-items:start}
+      .eg-rail-foot{margin-top:auto;border-top:1px solid var(--n300);
+        padding:14px 18px;display:grid;gap:9px}
+      .eg-main{flex:1;min-width:0;display:flex;flex-direction:column}
+
+      .eg-topbar{
+        display:flex;align-items:center;gap:16px;padding:0 24px;height:64px;flex:none;
+        background:var(--surface);position:relative;z-index:2;
+        box-shadow:0 1px 0 var(--n400),0 3px 8px rgba(25,23,21,0.07);
+      }
+      .eg-topbar-title{font-weight:800;font-size:17px;letter-spacing:0.01em;text-transform:uppercase}
+      .eg-topbar-desc{font-size:13.5px;color:var(--n600)}
+      .eg-topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+      .eg-live{
+        display:flex;align-items:center;gap:8px;border:1px solid var(--n400);padding:6px 11px;
+        font-family:var(--sans);font-size:11.5px;font-weight:700;letter-spacing:0.04em;
+        text-transform:uppercase;
+      }
+      .eg-live .dot{width:7px;height:7px;flex:none;background:var(--accent)}
+
+      .eg-panes{
+        flex:1;min-height:0;display:grid;
+        grid-template-columns:minmax(0,42fr) 1px minmax(0,58fr);
+      }
+      .eg-divider{background:var(--n400)}
+      .eg-screen{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;
+        background:var(--surface)}
+
+      .eg-burger{
+        display:none;background:none;border:0;padding:8px 4px;cursor:pointer;
+        flex-direction:column;gap:4px;margin-left:-4px;
+      }
+      .eg-burger i{width:20px;height:2.5px;background:var(--ink);display:block}
+      .eg-scrim{position:fixed;inset:0;z-index:4;background:rgba(25,23,21,0.45)}
+      .eg-tabs{display:none}
+
+      /* ── phone: the rail becomes a drawer, the panes become tabs ── */
+      @media (max-width:900px){
+        .eg-shell{display:block;height:100dvh;overflow:hidden}
+        .eg-main{height:100dvh}
+        .eg-burger{display:flex}
+
+        .eg-rail{
+          position:fixed;top:0;left:0;bottom:0;z-index:5;width:250px;
+          transform:translateX(-100%);transition:transform 180ms ease;
+        }
+        .eg-rail[data-open="true"]{transform:none}
+
+        .eg-topbar{padding:0 16px;gap:12px;height:60px}
+        .eg-topbar-title{font-size:15px}
+        .eg-topbar-right{gap:8px}
+        .eg-live{padding:4px 8px;font-size:10px}
+        .eg-live .dot{width:6px;height:6px}
+
+        .eg-tabs{display:grid;grid-template-columns:1fr 1fr;flex:none;
+          border-bottom:1px solid var(--n400);background:var(--bg)}
+        .eg-tab{
+          padding:12px 0;background:none;border:0;border-bottom:3px solid transparent;
+          font-family:var(--sans);font-size:12px;font-weight:800;letter-spacing:0.06em;
+          text-transform:uppercase;color:var(--n600);cursor:pointer;
+          display:flex;align-items:center;justify-content:center;gap:7px;
+        }
+        .eg-tab[data-active="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+        .eg-tab .n{font-family:var(--mono);font-weight:400;color:var(--n500)}
+
+        /* one pane at a time, filling what is left */
+        .eg-panes{grid-template-columns:1fr;min-height:0}
+
+        /* the graph and transcript lose the inset that made room for the sidebar */
+        .eg-turn{padding:16px 16px}
+        .eg-gtop{padding:14px 16px !important}
+        .eg-gcanvas{padding:0 12px !important}
+        .eg-glegend{padding:12px 16px 16px !important}
+        .eg-glegend > div:last-child{grid-template-columns:1fr 1fr !important;
+          grid-auto-flow:row !important;grid-template-rows:none !important}
+        .eg-ttop{padding:14px 16px !important}
+        .eg-inputrow{padding:12px 16px !important;gap:8px !important}
+        .eg-inputrow .eg-send{padding:0 18px}
+
+        /* screens that are not chat */
+        .eg-screen > div{padding:20px 16px !important}
+      }
+
       .eg-turn{padding:22px 30px;border-bottom:1px solid var(--n300)}
       .eg-turn[data-weak="true"]{background:var(--n200)}
       .eg-rule{width:2px;flex:none;background:var(--n400);align-self:stretch}
@@ -464,6 +555,24 @@ const DEMO_SAMPLES = [
   'The deadline is in March',
   'Actually the deadline moved to June',
 ]
+
+/* Below this width the console cannot show two panes side by side, so the
+   layout changes shape rather than shrinking. */
+const NARROW = '(max-width: 900px)'
+
+function useNarrow() {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(NARROW).matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW)
+    const onChange = (e) => setNarrow(e.matches)
+    setNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -1490,7 +1599,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
     <section style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
       background: 'var(--bg)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 22px 16px 34px', flex: 'none' }}>
+        padding: '16px 22px 16px 34px', flex: 'none' }} className="eg-gtop">
         <span className="eg-panel-title">Memory graph</span>
         <span className="eg-mono" style={{ fontSize: 11.5, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: 'var(--n600)' }}>
@@ -1499,7 +1608,7 @@ function MemoryGraphPanel({ refreshTrigger }) {
       </div>
 
       {/* 34px of left padding keeps the panel off the sidebar edge */}
-      <div style={{ flex: 1, minHeight: 0, padding: '0 22px 0 34px' }}>
+      <div className="eg-gcanvas" style={{ flex: 1, minHeight: 0, padding: '0 22px 0 34px' }}>
         <div ref={hostRef} style={{ position: 'relative', width: '100%', height: '100%',
           overflow: 'hidden' }}>
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -1514,7 +1623,8 @@ function MemoryGraphPanel({ refreshTrigger }) {
         </div>
       </div>
 
-      <div style={{ padding: '16px 22px 18px 34px', flex: 'none', display: 'grid', gap: 12 }}>
+      <div className="eg-glegend"
+        style={{ padding: '16px 22px 18px 34px', flex: 'none', display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', alignItems: 'baseline' }}>
           <span className="eg-label" style={{ color: 'var(--ink)' }}>How to read</span>
           <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, fontWeight: 600,
@@ -1776,7 +1886,8 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
     <section style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0,
       background: 'var(--surface)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 30px', flex: 'none', borderBottom: '1px solid var(--n300)' }}>
+        padding: '16px 30px', flex: 'none', borderBottom: '1px solid var(--n300)' }}
+        className="eg-ttop">
         <span className="eg-panel-title">Transcript</span>
         <span className="eg-mono" style={{ fontSize: 11.5, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: 'var(--n600)' }}>
@@ -1845,7 +1956,8 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
         )}
       </div>
 
-      <div style={{ flex: 'none', display: 'flex', gap: 12, padding: '18px 30px',
+      <div className="eg-inputrow"
+        style={{ flex: 'none', display: 'flex', gap: 12, padding: '18px 30px',
         borderTop: '1px solid var(--n300)' }}>
         <input
           className="eg-input"
@@ -2275,6 +2387,14 @@ function AppInner({ email, onLogout }) {
   const sessionId = useMemo(
     () => '0x' + Math.random().toString(16).slice(2, 6).toUpperCase(), []
   )
+  const narrow = useNarrow()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [pane, setPane] = useState('transcript')   // which pane shows on a phone
+
+  // a new reply is worth seeing, so a phone returns to the transcript
+  useEffect(() => { if (narrow) setPane('transcript') }, [narrow])
+  // the drawer must not survive a return to desktop
+  useEffect(() => { if (!narrow) setMenuOpen(false) }, [narrow])
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
@@ -2383,12 +2503,14 @@ function AppInner({ email, onLogout }) {
   }[view]
 
   return (
-    <div style={{ height: '100vh', display: 'flex', background: 'var(--bg)' }}>
-      <nav style={{ width: 196, flex: 'none', position: 'relative', zIndex: 3,
-        background: 'var(--bg)', display: 'flex', flexDirection: 'column',
-        boxShadow: '3px 0 6px rgba(25,23,21,0.10), 14px 0 30px rgba(25,23,21,0.16)' }}>
-        <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--n300)',
-          display: 'grid', gap: 9, justifyItems: 'start' }}>
+    <div className="eg-shell">
+      {/* the rail is a column on desktop and a drawer on a phone — same markup */}
+      {narrow && menuOpen && (
+        <div className="eg-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+      )}
+
+      <nav className="eg-rail" data-open={narrow && menuOpen}>
+        <div className="eg-rail-brand">
           <Wordmark width={148} />
           <span className="eg-kicker">Memory layer</span>
         </div>
@@ -2396,69 +2518,90 @@ function AppInner({ email, onLogout }) {
         <div style={{ padding: '8px 0' }}>
           {NAV.map(n => (
             <button key={n.id} className="eg-nav" data-active={view === n.id}
-              onClick={() => setView(n.id)}>
+              onClick={() => { setView(n.id); setMenuOpen(false) }}>
               <span>{n.label}</span>
               {badges[n.id] != null && <span className="badge">{badges[n.id]}</span>}
             </button>
           ))}
         </div>
 
-        <div style={{ marginTop: 'auto', borderTop: '1px solid var(--n300)', padding: '14px 18px',
-          display: 'grid', gap: 9 }}>
+        <div className="eg-rail-foot">
           <span className="eg-label">Signed in</span>
           <span style={{ fontSize: 13.5, lineHeight: 1.35, wordBreak: 'break-all' }}>{email}</span>
           <button className="eg-link" style={{ justifySelf: 'start' }} onClick={onLogout}>
             Log out
           </button>
+          {narrow && (
+            <button className="eg-ghost" style={{ justifySelf: 'start', marginTop: 4 }}
+              onClick={() => { resetSession(); setMenuOpen(false) }}>
+              Reset session
+            </button>
+          )}
         </div>
       </nav>
 
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <header style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '0 24px',
-          height: 64, flex: 'none', background: 'var(--surface)', position: 'relative', zIndex: 2,
-          boxShadow: '0 1px 0 var(--n400), 0 3px 8px rgba(25,23,21,0.07)' }}>
-          <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: '0.01em',
-            textTransform: 'uppercase' }}>{heading[0]}</span>
-          <span style={{ fontSize: 13.5, color: 'var(--n600)' }}>{heading[1]}</span>
+      <div className="eg-main">
+        <header className="eg-topbar">
+          {narrow && (
+            <button className="eg-burger" onClick={() => setMenuOpen(true)} aria-label="Menu">
+              <i /><i /><i />
+            </button>
+          )}
+          <span className="eg-topbar-title">{heading[0]}</span>
+          {!narrow && <span className="eg-topbar-desc">{heading[1]}</span>}
 
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span className="eg-mono" style={{ fontSize: 12, letterSpacing: '0.08em',
-              textTransform: 'uppercase', color: 'var(--n600)' }}>
-              session {sessionId}
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8,
-              border: '1px solid var(--n400)', padding: '6px 11px', fontFamily: 'var(--sans)',
-              fontSize: 11.5, fontWeight: 700, letterSpacing: '0.04em',
-              textTransform: 'uppercase' }}>
-              <span style={{ width: 7, height: 7, flex: 'none', background: 'var(--accent)' }} />
-              live
-            </span>
-            <button className="eg-ghost" style={{ textTransform: 'none', fontSize: 13,
-              letterSpacing: 0, padding: '7px 14px' }}
-              onClick={resetSession}>Reset session</button>
+          <div className="eg-topbar-right">
+            {!narrow && (
+              <span className="eg-mono" style={{ fontSize: 12, letterSpacing: '0.08em',
+                textTransform: 'uppercase', color: 'var(--n600)' }}>
+                session {sessionId}
+              </span>
+            )}
+            <span className="eg-live"><span className="dot" />live</span>
+            {!narrow && (
+              <button className="eg-ghost" style={{ textTransform: 'none', fontSize: 13,
+                letterSpacing: 0, padding: '7px 14px' }}
+                onClick={resetSession}>Reset session</button>
+            )}
           </div>
         </header>
 
+        {/* on a phone the two panes become tabs; there is no room to show both */}
+        {narrow && view === 'chat' && (
+          <div className="eg-tabs">
+            <button className="eg-tab" data-active={pane === 'transcript'}
+              onClick={() => setPane('transcript')}>
+              Transcript{turns > 0 && <span className="n">{turns}</span>}
+            </button>
+            <button className="eg-tab" data-active={pane === 'graph'}
+              onClick={() => setPane('graph')}>
+              Graph
+            </button>
+          </div>
+        )}
+
         {view === 'chat' ? (
-          <div style={{ flex: 1, minHeight: 0, display: 'grid',
-            gridTemplateColumns: 'minmax(0,42fr) 1px minmax(0,58fr)' }}>
-            <MemoryGraphPanel refreshTrigger={graphRefresh} />
-            <span style={{ background: 'var(--n400)' }} />
-            <Transcript
-              messages={messages}
-              stageLabel={stageLabel}
-              input={input}
-              setInput={setInput}
-              send={sendMessage}
-              loading={loading}
-              onFeedback={sendFeedback}
-              meanScore={meanScore}
-              turns={turns}
-            />
+          <div className="eg-panes" data-pane={narrow ? pane : 'both'}>
+            {(!narrow || pane === 'graph') && (
+              <MemoryGraphPanel refreshTrigger={graphRefresh} />
+            )}
+            {!narrow && <span className="eg-divider" />}
+            {(!narrow || pane === 'transcript') && (
+              <Transcript
+                messages={messages}
+                stageLabel={stageLabel}
+                input={input}
+                setInput={setInput}
+                send={sendMessage}
+                loading={loading}
+                onFeedback={sendFeedback}
+                meanScore={meanScore}
+                turns={turns}
+              />
+            )}
           </div>
         ) : (
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex',
-            flexDirection: 'column', background: 'var(--surface)' }}>
+          <div className="eg-screen">
             {view === 'trace' && <TraceScreen refreshTrigger={graphRefresh} />}
             {view === 'documents' && (
               <DocumentsScreen onIngest={() => setGraphRefresh(p => p + 1)} />
