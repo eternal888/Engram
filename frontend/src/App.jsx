@@ -23,12 +23,24 @@ const AGENT_COLOR = {
   memory_writer:       '#8d8471',
 }
 
+/* Plain words throughout. The database calls these episodes, concepts and
+   entities; a visitor calls them things they said, facts, and people. The
+   schema names stay in the code and in the docs — not on screen. */
 const NAV = [
   { id: 'chat',      label: 'Chat' },
   { id: 'documents', label: 'Documents' },
-  { id: 'sessions',  label: 'Sessions' },
-  { id: 'trace',     label: 'Agent Trace' },
+  { id: 'sessions',  label: 'History' },
+  { id: 'trace',     label: 'Behind the answer' },
 ]
+
+// what each node type is called where a person can read it
+const TYPE_NAME = {
+  Episode:       'Things you said',
+  Concept:       'Facts',
+  Entity:        'People & places',
+  Source:        'From documents',
+  Contradiction: 'Conflicts',
+}
 
 /* ──────────────────────────────────────────────────────────────
    Axios instance with auth token auto-injection + 401 logout.
@@ -62,6 +74,36 @@ const nodeLabel = (raw, type) => {
   if (stripped.length > 2) t = stripped
   return truncate(t, 14)
 }
+/* The transcript survives a refresh but not the tab closing. The graph is the
+   real persistence layer — this is only so a reload does not look like the
+   product lost your conversation. Scoped per account so switching users cannot
+   surface someone else's turns. */
+const TRANSCRIPT_KEY = (email) => `engram_transcript:${email || 'anon'}`
+
+const loadTranscript = (email) => {
+  try {
+    const raw = sessionStorage.getItem(TRANSCRIPT_KEY(email))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    // a reply cut off mid-stream would restore with its caret still blinking
+    return Array.isArray(parsed)
+      ? parsed.map(m => ({ ...m, streaming: false, stage: null }))
+      : []
+  } catch {
+    return []
+  }
+}
+
+const saveTranscript = (email, messages) => {
+  try {
+    const done = messages.filter(m => !m.streaming)
+    if (!done.length) sessionStorage.removeItem(TRANSCRIPT_KEY(email))
+    else sessionStorage.setItem(TRANSCRIPT_KEY(email), JSON.stringify(done.slice(-40)))
+  } catch {
+    // a full quota is not worth breaking the interface over
+  }
+}
+
 const clockTime = () =>
   new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
@@ -536,6 +578,11 @@ function StyleTokens() {
         background:var(--accent-100);border:1px solid var(--accent);color:var(--accent-700);
       }
 
+      .eg-graph-hint{
+        position:absolute;right:10px;bottom:8px;pointer-events:none;
+        font-family:var(--mono);font-size:9.5px;letter-spacing:0.08em;
+        text-transform:uppercase;color:var(--n500);
+      }
       .eg-tracebar{height:6px;min-width:2px;transition:width 240ms ease}
 
       @keyframes egcaret{0%,49%{opacity:1}50%,100%{opacity:0}}
@@ -697,6 +744,7 @@ function DemoGraph({ facts, edges, focus, onFocus }) {
     const host = hostRef.current
     if (!canvas || !host) return
     const ctx = canvas.getContext('2d')
+    const reduced = prefersReducedMotion()
     let W = 0, H = 0
 
     const radiusOf = (n) => (9 + n.deg * 1.8) * (n.retired ? 0.72 : 1)
@@ -886,6 +934,7 @@ function DemoGraph({ facts, edges, focus, onFocus }) {
       const r = canvas.getBoundingClientRect()
       return { x: evt.clientX - r.left, y: evt.clientY - r.top }
     }
+    const isTouch = (evt) => evt.pointerType === 'touch' || evt.pointerType === 'pen'
     const pick = (evt) => {
       const { x, y } = at(evt)
       for (const p of simRef.current.nodes) {
@@ -1335,70 +1384,106 @@ function AuthScreen({ onAuthed }) {
 /* ──────────────────────────────────────────────────────────────
    Memory graph.
 
-   Force layout runs until kinetic energy falls below a threshold,
-   then parks. Hover and selection repaint a single frame without
-   waking the physics, so nodes hold still while being aimed at.
+   The field is a plane. Physics runs in x and z; y is height above
+   it, and height carries meaning — a contradiction floats clear of
+   the field rather than sitting in it. A ground shadow and a dashed
+   drop line anchor each node, without which height reads as nothing
+   more than an arbitrary offset.
+
+   The camera orbits with the pointer and eases toward its target.
+   Dragging inverts the projection at the node's own height, so a
+   node follows the cursor rather than sliding across the plane.
+
+   The loop parks once kinetic energy settles. Hover and selection
+   repaint a single frame without waking the physics.
    ────────────────────────────────────────────────────────────── */
 const SLEEP_ENERGY = 0.012
 const SLEEP_FRAMES = 24
 const LABEL_LIMIT  = 34
-// Above the limit only these carry standing labels; episodes label on hover.
 const ALWAYS_LABEL = new Set(['Entity', 'Concept', 'Contradiction'])
+
+// height above the plane. Contradictions sit well clear of everything else.
+const FLOAT_CONFLICT = -74
+const MIN_NODE_PX = 5.5      // no node ever draws smaller than this, however deep
+// below this a plain every-pair loop beats the cost of bucketing
+const GRID_THRESHOLD = 60
+const floatFor = (type, i) => (type === 'Contradiction' ? FLOAT_CONFLICT : -20 - (i % 5) * 6)
 
 function MemoryGraphPanel({ refreshTrigger }) {
   const hostRef = useRef(null)
   const canvasRef = useRef(null)
   const stateRef = useRef({ nodes: [], edges: [], adj: new Map() })
-  const viewRef = useRef({ hover: -1, selected: -1, W: 0, H: 0 })
+  const viewRef = useRef({ hover: -1, selected: -1, W: 0, H: 0, held: null, k: 1 })
+  const camRef = useRef({ yaw: 0, target: 0, pitch: 0.86, focal: 900, back: 620 })
+  const projRef = useRef(new Map())
   const loopRef = useRef({ raf: 0, still: 0, running: false })
-  const drawRef = useRef(() => {})
   const wakeRef = useRef(() => {})
   const [counts, setCounts] = useState({ nodes: 0, edges: 0, byType: {} })
   const [showEpisodes, setShowEpisodes] = useState(true)
   const showEpisodesRef = useRef(true)
+  // a coarse pointer has no hover, so the affordance line has to differ
+  const coarse = typeof window !== 'undefined' &&
+    window.matchMedia && window.matchMedia('(pointer: coarse)').matches
 
   const loadGraph = useCallback(async () => {
     try {
       const res = await api.get('/memory/graph')
-      const { W, H } = viewRef.current
-      const w = W || 700, h = H || 520
+      const k = viewRef.current.k || 1
       const idMap = new Map()
       const byType = {}
-
-      // Shrink nodes as the graph grows so density stays workable.
-      const count = res.data.nodes.filter(
-        n => showEpisodesRef.current || n.type !== 'Episode'
-      ).length
-      const scale = Math.max(0.55, Math.min(1, Math.sqrt(20 / Math.max(1, count))))
+      for (const n of res.data.nodes) byType[n.type] = (byType[n.type] || 0) + 1
 
       const visible = res.data.nodes.filter(
         n => showEpisodesRef.current || n.type !== 'Episode'
       )
-
-      for (const n of res.data.nodes) byType[n.type] = (byType[n.type] || 0) + 1
+      // shrinks as the graph fills, but stops well before it stops being a node
+      const scale = Math.max(0.62, Math.min(1, Math.sqrt(22 / Math.max(1, visible.length))))
 
       const nodes = visible.map((n, i) => {
-        const type = n.type
-        // area encodes strength, so radius scales with the square root
-        const strength = typeof n.confidence === 'number' ? n.confidence : 0.6
         idMap.set(n.id, i)
+        const strength = typeof n.confidence === 'number' ? n.confidence : 0.6
+        const a = i * 2.39996
+        const rad = (60 + Math.sqrt(i + 1) * 42) * k
         return {
-          id: n.id, idx: i, type,
-          label: nodeLabel(n.label, type),
-          r: (5 + Math.sqrt(Math.max(0.05, strength)) * 7.5 + (type === 'Contradiction' ? 2 : 0)) * scale,
-          x: w * 0.5 + (Math.random() - 0.5) * w * 0.6,
-          y: h * 0.5 + (Math.random() - 0.5) * h * 0.7,
-          vx: 0, vy: 0,
+          id: n.id, idx: i, type: n.type,
+          label: nodeLabel(n.label, n.type),
+          r: (5 + Math.sqrt(Math.max(0.05, strength)) * 7.5
+              + (n.type === 'Contradiction' ? 2 : 0)) * scale,
+          x: Math.cos(a) * rad, z: Math.sin(a) * rad,
+          h: floatFor(n.type, i), y: 0,
+          vx: 0, vz: 0, trail: [], pop: 0,
+          // its own phase and rate, so nothing beats in unison
+          phase: (i * 1.7) % (Math.PI * 2),
+          rate: 0.55 + ((i * 37) % 45) / 100,
+          sway: 0.7 + ((i * 23) % 60) / 100,
         }
       })
 
-      const edges = res.data.edges
-        .filter(e => idMap.has(e.source) && idMap.has(e.target))
-        .map(e => {
-          const a = idMap.get(e.source), b = idMap.get(e.target)
-          const conflict = nodes[a].type === 'Contradiction' || nodes[b].type === 'Contradiction'
-          return { a, b, conflict, rel: e.relationship }
+      // An edge whose source or target is not in idMap is silently unusable.
+      // Counting the drops separates two very different explanations for a
+      // sparse graph: the backend genuinely returned few edges, or it returned
+      // edges pointing at nodes that were filtered out on the way in.
+      let dropped = 0
+      const edges = []
+      for (const e of (res.data.edges || [])) {
+        const a = idMap.get(e.source), b = idMap.get(e.target)
+        if (a === undefined || b === undefined) { dropped++; continue }
+        edges.push({
+          a, b, rel: e.relationship,
+          conflict: nodes[a].type === 'Contradiction' || nodes[b].type === 'Contradiction',
         })
+      }
+      const returned = (res.data.edges || []).length
+      if (dropped) {
+        console.warn(
+          `[graph] ${dropped} of ${returned} edges dropped — endpoint not in the node set` +
+          (showEpisodesRef.current ? '' : ' (expected: turns are hidden)')
+        )
+      }
+      console.info(
+        `[graph] ${res.data.nodes.length} nodes / ${returned} edges from the API · ` +
+        `${nodes.length} nodes / ${edges.length} edges drawn`
+      )
 
       const adj = new Map()
       nodes.forEach(n => adj.set(n.idx, []))
@@ -1407,6 +1492,8 @@ function MemoryGraphPanel({ refreshTrigger }) {
       stateRef.current = { nodes, edges, adj }
       viewRef.current.hover = -1
       viewRef.current.selected = -1
+      viewRef.current.held = null
+      projRef.current.clear()
       setCounts({ nodes: nodes.length, edges: edges.length, byType })
       wakeRef.current()
     } catch (err) {
@@ -1424,12 +1511,52 @@ function MemoryGraphPanel({ refreshTrigger }) {
     const host = hostRef.current
     if (!canvas || !host) return
     const ctx = canvas.getContext('2d')
-    const DPR = Math.min(window.devicePixelRatio || 1, 2)
+    const reduced = prefersReducedMotion()
+
+    // ── camera ──
+    const project = (x, y, z) => {
+      const { W, H } = viewRef.current
+      const cam = camRef.current
+      const ca = Math.cos(cam.yaw), sa = Math.sin(cam.yaw)
+      const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch)
+      const rx = x * ca - z * sa, rz = x * sa + z * ca
+      const ry = y * cp - rz * sp, dz = y * sp + rz * cp
+      const s = cam.focal / (cam.focal + dz + cam.back)
+      return { x: W * 0.5 + rx * s, y: H * 0.56 + ry * s, s, depth: dz }
+    }
+
+    // Inverse of the plane map at a fixed height — what dragging needs.
+    // Solved iteratively because the perspective divide depends on the answer.
+    const unproject = (sx, sy, y) => {
+      const cam = camRef.current
+      const ca = Math.cos(cam.yaw), sa = Math.sin(cam.yaw), sp = Math.sin(cam.pitch)
+      let gx = 0, gz = 0
+      for (let i = 0; i < 3; i++) {
+        const p = project(gx, y, gz)
+        const s = p.s
+        const dx = sx - p.x, dy = sy - p.y
+        const A = ca * s, B = -sa * s, C = -sa * sp * s, D = -ca * sp * s
+        const det = A * D - B * C
+        if (!det) break
+        gx += (dx * D - B * dy) / det
+        gz += (A * dy - dx * C) / det
+      }
+      return { x: gx, z: gz }
+    }
 
     const resize = () => {
       const W = host.clientWidth, H = host.clientHeight
+      if (!W || !H) return
+      const DPR = Math.min(window.devicePixelRatio || 1, 2)
+      // the world extent follows the panel, so the same graph fits any width
+      const k = Math.max(0.3, Math.min(1.35, Math.min(W, H) / 560))
+      if (Math.abs(k - viewRef.current.k) > 0.001) {
+        const f = k / (viewRef.current.k || 1)
+        stateRef.current.nodes.forEach(n => { n.x *= f; n.z *= f; n.trail = [] })
+        viewRef.current.k = k
+      }
       viewRef.current.W = W; viewRef.current.H = H
-      canvas.width = W * DPR; canvas.height = H * DPR
+      canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR)
       canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
       wake()
@@ -1437,229 +1564,483 @@ function MemoryGraphPanel({ refreshTrigger }) {
 
     const step = () => {
       const { nodes, edges } = stateRef.current
-      const { W, H } = viewRef.current
-      const cx = W / 2, cy = H / 2
+      const n = nodes.length
+      if (!n) return 0
+      if (loopRef.current.settled && viewRef.current.held === null) return 0
+      const k = viewRef.current.k || 1
+      const held = viewRef.current.held
+      const rest = Math.max(92, 210 - n * 6) * k
+      const sep = 66 * k
+      // A sparse graph has too few springs to pull itself together, so
+      // repulsion wins and everything ends up against the boundary. Gravity
+      // makes up the difference: the fewer edges per node, the harder it pulls.
+      const density = edges.length / Math.max(1, n)
+      const gravity = 0.003 + Math.max(0, 1.2 - density) * 0.011
       let energy = 0
 
-      // Spacing follows the area each node can claim, so the graph fills the
-      // panel at any count instead of clumping once it grows.
-      const cell = Math.sqrt((W * H) / Math.max(1, nodes.length))
-      const rest = Math.max(55, Math.min(160, cell * 0.66))
-      const sep = Math.max(26, Math.min(70, cell * 0.46))
-      // Centre gravity holds a dense core; repulsion only opens it enough to
-      // read. Well-connected nodes settle inward, loose ones drift out.
-      const pull = 0.0026
-      for (const n of nodes) {
-        n.vx += (cx - n.x) * pull
-        n.vy += (cy - n.y) * pull * 0.8
-      }
-      // Inverse-square repulsion across every pair — this is what opens the
-      // graph out. Overlap prevention alone only stops collisions.
-      const charge = cell * cell * 0.06
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i], b = nodes[j]
-          let dx = a.x - b.x, dy = a.y - b.y
-          let d2 = dx * dx + dy * dy
-          if (d2 < 1) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = 1 }
-          const d = Math.sqrt(d2)
-          const f = Math.min(charge / d2, 1.6) / d
-          a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f
+      // Repulsion falls off with the square of distance, so a node two cells
+      // away contributes almost nothing. Below the threshold the every-pair
+      // loop is cheaper than building a grid; above it, bucketing turns an
+      // O(n²) pass into something closer to linear.
+      const CUT = rest * 2.2                 // beyond this the force is negligible
+      const CUT2 = CUT * CUT
 
-          const min = a.r + b.r + sep
-          if (d < min) {
-            const g = 0.8 * (1 - d / min) / d
-            a.vx += dx * g; a.vy += dy * g; b.vx -= dx * g; b.vy -= dy * g
+      const repel = (a, b) => {
+        const dx = b.x - a.x, dz = b.z - a.z
+        const d2 = dx * dx + dz * dz || 0.01
+        if (d2 > CUT2) return
+        const d = Math.sqrt(d2)
+        const f = (rest * rest * 1.5) / d2 / d
+        a.vx -= dx * f; a.vz -= dz * f; b.vx += dx * f; b.vz += dz * f
+        if (d < sep) {
+          const g = ((sep - d) / d) * 0.5
+          a.vx -= dx * g; a.vz -= dz * g; b.vx += dx * g; b.vz += dz * g
+        }
+      }
+
+      if (n < GRID_THRESHOLD) {
+        for (let i = 0; i < n; i++) {
+          for (let j = i + 1; j < n; j++) repel(nodes[i], nodes[j])
+        }
+      } else {
+        // one bucket per CUT-sized cell; each node then only has to look at
+        // its own cell and the four already-visited neighbours, which covers
+        // every pair exactly once without a visited set
+        const cells = new Map()
+        const key = (cx, cz) => cx * 73856093 ^ cz * 19349663
+        for (const p of nodes) {
+          p.cx = Math.floor(p.x / CUT); p.cz = Math.floor(p.z / CUT)
+          const k2 = key(p.cx, p.cz)
+          const bucket = cells.get(k2)
+          if (bucket) bucket.push(p); else cells.set(k2, [p])
+        }
+        const NEIGHBOURS = [[1, 0], [-1, 1], [0, 1], [1, 1]]
+        for (const bucket of cells.values()) {
+          for (let i = 0; i < bucket.length; i++) {
+            const a = bucket[i]
+            for (let j = i + 1; j < bucket.length; j++) repel(a, bucket[j])
+            for (const [ox, oz] of NEIGHBOURS) {
+              const other = cells.get(key(a.cx + ox, a.cz + oz))
+              if (!other) continue
+              for (const b of other) repel(a, b)
+            }
           }
         }
       }
       for (const e of edges) {
         const a = nodes[e.a], b = nodes[e.b]
-        const dx = b.x - a.x, dy = b.y - a.y
-        const d = Math.hypot(dx, dy) || 0.001
-        const f = (d - rest) * 0.0034
-        a.vx += (dx / d) * f; a.vy += (dy / d) * f
-        b.vx -= (dx / d) * f; b.vy -= (dy / d) * f
+        if (!a || !b) continue
+        const dx = b.x - a.x, dz = b.z - a.z
+        const d = Math.hypot(dx, dz) || 0.001
+        const f = (d - rest) * 0.013
+        a.vx += (dx / d) * f; a.vz += (dz / d) * f
+        b.vx -= (dx / d) * f; b.vz -= (dz / d) * f
+        // each edge also drags both ends inward a little, so the node with the
+        // most connections ends up nearest the centre rather than by accident
+        a.vx -= a.x * 0.0016; a.vz -= a.z * 0.0016
+        b.vx -= b.x * 0.0016; b.vz -= b.z * 0.0016
       }
-      // A soft margin rather than a hard wall. Clamping made unconnected
-      // nodes queue along the frame; this turns them back before they land.
-      const margin = Math.max(40, cell * 0.5)
-      for (const n of nodes) {
-        const push = 0.045
-        if (n.x < margin) n.vx += (margin - n.x) * push
-        else if (n.x > W - margin) n.vx -= (n.x - (W - margin)) * push
-        if (n.y < margin) n.vy += (margin - n.y) * push
-        else if (n.y > H - margin) n.vy -= (n.y - (H - margin)) * push
 
-        n.vx *= 0.84; n.vy *= 0.84
-        const sp = Math.hypot(n.vx, n.vy)
-        if (sp > 2.5) { n.vx = n.vx / sp * 2.5; n.vy = n.vy / sp * 2.5 }
-        n.x += n.vx; n.y += n.vy
-
-        // hard stop only at the very edge, as a last resort
-        const pad = n.r + 6
-        n.x = Math.max(pad, Math.min(W - pad, n.x))
-        n.y = Math.max(pad, Math.min(H - pad, n.y))
-        energy += n.vx * n.vx + n.vy * n.vy
+      const lim = 430 * k
+      for (const p of nodes) {
+        if (held === p.idx) { p.vx = 0; p.vz = 0; p.y = (p.h || 0) * k; continue }
+        p.vx += -p.x * gravity; p.vz += -p.z * gravity
+        p.vx *= 0.85; p.vz *= 0.85
+        p.x += p.vx; p.z += p.vz
+        p.x = Math.max(-lim, Math.min(lim, p.x))
+        p.z = Math.max(-lim, Math.min(lim, p.z))
+        p.y = (p.h || 0) * k
+        energy += p.vx * p.vx + p.vz * p.vz
       }
-      return nodes.length ? energy / nodes.length : 0
+
+      const cam = camRef.current
+      const dy = cam.target - cam.yaw
+      if (Math.abs(dy) > 0.0004) { cam.yaw += dy * 0.07; energy += 0.4 }
+
+      return energy / n
+    }
+
+    const drawFloor = () => {
+      const k = viewRef.current.k || 1
+      const S = 430 * k, STEP = 86 * k
+      ctx.save(); ctx.lineWidth = 1.4
+      for (let i = -S; i <= S + 0.001; i += STEP) {
+        for (const seg of [[[i, -S], [i, S]], [[-S, i], [S, i]]]) {
+          const A = project(seg[0][0], 0, seg[0][1])
+          const B = project(seg[1][0], 0, seg[1][1])
+          const g = ctx.createLinearGradient(A.x, A.y, B.x, B.y)
+          g.addColorStop(0, 'rgba(0,0,0,0)')
+          g.addColorStop(0.5, 'rgba(199,181,147,0.85)')
+          g.addColorStop(1, 'rgba(0,0,0,0)')
+          ctx.strokeStyle = g
+          ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke()
+        }
+      }
+      ctx.restore()
     }
 
     const draw = () => {
       const { nodes, edges, adj } = stateRef.current
       const { W, H, hover, selected } = viewRef.current
+      const k = viewRef.current.k || 1
       ctx.clearRect(0, 0, W, H)
+
+      // project once per frame; everything below reads from this
+      const proj = projRef.current
+      proj.clear()
+      for (const p of nodes) {
+        const q = project(p.x + (p.drift || 0), p.y, p.z)
+        const g = project(p.x, 0, p.z)         // where it meets the plane
+        // MIN_NODE_PX is the floor: a distant node in a crowded field still
+        // has to be findable and clickable, so perspective may shrink it only
+        // so far. Without this, the back of the field turns into specks.
+        const swell = 1 + (p.pop || 0) * 0.28
+        const rr = Math.max(MIN_NODE_PX, p.r * q.s * 1.9) * swell
+        proj.set(p.idx, { ...q, gx: g.x, gy: g.y, r: rr })
+      }
 
       const focus = selected >= 0 ? selected : hover
       const near = focus >= 0 ? new Set([focus, ...(adj.get(focus) || [])]) : null
-      const dim = (i) => (near && !near.has(i) ? 0.4 : 1)
+      const dim = (i) => (near && !near.has(i) ? 0.22 : 1)
+
+      drawFloor()
+
+      // shadow and drop line — this is what makes height legible
+      for (const p of nodes) {
+        const q = proj.get(p.idx); if (!q) continue
+        ctx.save()
+        // higher node, smaller and fainter shadow — the cue that reads as height
+        const lift = Math.min(1, Math.abs(p.y) / 90)
+        ctx.globalAlpha = (0.20 - lift * 0.09) * dim(p.idx)
+        ctx.fillStyle = p.type === 'Contradiction' ? '#f01f0a' : '#191715'
+        ctx.beginPath()
+        ctx.ellipse(q.gx, q.gy, q.r * (1.25 - lift * 0.3), q.r * (0.42 - lift * 0.1), 0, 0, 7)
+        ctx.fill()
+        ctx.globalAlpha = 0.14 * dim(p.idx)
+        ctx.strokeStyle = '#8d8471'; ctx.lineWidth = 1; ctx.setLineDash([3, 4])
+        ctx.beginPath(); ctx.moveTo(q.x, q.y + q.r * 0.4); ctx.lineTo(q.gx, q.gy); ctx.stroke()
+        ctx.restore()
+      }
+
+      // a short trail behind anything still moving
+      for (const p of nodes) {
+        if (!p.trail || p.trail.length < 3) continue
+        ctx.save()
+        ctx.globalAlpha = 0.26 * dim(p.idx)
+        ctx.strokeStyle = '#8d8471'; ctx.lineWidth = 1.6
+        ctx.beginPath()
+        p.trail.forEach((t, i) => (i ? ctx.lineTo(t.x, t.y) : ctx.moveTo(t.x, t.y)))
+        ctx.stroke(); ctx.restore()
+      }
 
       for (const e of edges) {
-        const a = nodes[e.a], b = nodes[e.b]
-        const alpha = Math.min(dim(e.a), dim(e.b))
+        const A = proj.get(e.a), B = proj.get(e.b)
+        if (!A || !B) continue
         ctx.save()
-        ctx.globalAlpha = alpha
+        ctx.globalAlpha = Math.min(dim(e.a), dim(e.b))
         if (e.conflict) {
-          ctx.strokeStyle = '#f01f0a'
-          ctx.lineWidth = 1.6
-          ctx.setLineDash([7, 6])
+          ctx.strokeStyle = '#f01f0a'; ctx.lineWidth = 3.4; ctx.setLineDash([8, 6])
         } else {
-          ctx.strokeStyle = '#c7b593'
-          ctx.lineWidth = 1.4
+          ctx.strokeStyle = '#b09a70'; ctx.lineWidth = 2.8
         }
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke()
         ctx.restore()
       }
 
-      for (const n of nodes) {
-        const c = NODE[n.type] || FALLBACK
-        ctx.save()
+      // far to near, so nearer nodes occlude
+      const order = nodes.slice().sort(
+        (a, b) => proj.get(b.idx).depth - proj.get(a.idx).depth
+      )
 
+      for (const p of order) {
+        const q = proj.get(p.idx)
+        const c = NODE[p.type] || FALLBACK
+        ctx.save()
+        ctx.globalAlpha = dim(p.idx) * (0.5 + (p.pop || 0) * 0.35)
         ctx.fillStyle = c.ring
-        ctx.globalAlpha = dim(n.idx) * 0.5
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 7, 0, Math.PI * 2); ctx.fill()
+        ctx.beginPath()
+        ctx.arc(q.x, q.y, q.r + (7 + (p.pop || 0) * 8) * q.s, 0, 7)
+        ctx.fill()
 
-        ctx.globalAlpha = dim(n.idx)
+        ctx.globalAlpha = dim(p.idx)
         ctx.fillStyle = c.fill
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill()
+        ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, 7); ctx.fill()
 
-        if (n.type === 'Entity' || n.type === 'Source') {
+        if (p.type === 'Entity' || p.type === 'Source') {
           ctx.strokeStyle = c.ring === '#d5c5a4' ? '#8d8471' : c.ring
-          ctx.lineWidth = 4
-          ctx.beginPath(); ctx.arc(n.x, n.y, n.r - 2, 0, Math.PI * 2); ctx.stroke()
+          ctx.lineWidth = Math.max(1, 4 * q.s)
+          ctx.beginPath(); ctx.arc(q.x, q.y, Math.max(1, q.r - 2 * q.s), 0, 7); ctx.stroke()
         }
-        if (focus === n.idx) {
-          ctx.strokeStyle = '#191715'
+
+        // corner brackets rather than a ring, so the focus mark reads at any depth
+        if (focus === p.idx) {
+          ctx.strokeStyle = p.type === 'Contradiction' ? '#a81400' : '#191715'
           ctx.lineWidth = 1.5
-          ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 11, 0, Math.PI * 2); ctx.stroke()
+          const m = q.r + 9
+          for (const [sx, sy] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {
+            ctx.beginPath()
+            ctx.moveTo(q.x + sx * m, q.y + sy * m - sy * 6)
+            ctx.lineTo(q.x + sx * m, q.y + sy * m)
+            ctx.lineTo(q.x + sx * m - sx * 6, q.y + sy * m)
+            ctx.stroke()
+          }
         }
         ctx.restore()
       }
 
-      // Labels last, so a node never covers one. A label flips to the left
-      // when it would leave the panel, and is skipped when it would land on
-      // one already placed — the focused node always wins its slot.
-      ctx.font = '700 9px "JetBrains Mono", monospace'
+      // labels last, seeded with the node discs so text never lands on one
+      ctx.font = '700 9px "JetBrains Mono", ui-monospace, monospace'
       ctx.textBaseline = 'middle'
-      const placed = []
-      const order = focus >= 0 ? [nodes[focus], ...nodes.filter(n => n.idx !== focus)] : nodes
+      const taken = order.map(p => {
+        const q = proj.get(p.idx)
+        return { x: q.x - q.r - 2, y: q.y - q.r - 2, w: q.r * 2 + 4, h: q.r * 2 + 4 }
+      })
+      const hits = (b) => taken.some(t =>
+        b.x < t.x + t.w && b.x + b.w > t.x && b.y < t.y + t.h && b.y + b.h > t.y)
+
       const showAll = nodes.length <= LABEL_LIMIT
+      const labelOrder = focus >= 0
+        ? [nodes[focus], ...order.filter(p => p.idx !== focus)].filter(Boolean)
+        : order
 
-      for (const n of order) {
-        const isFocus = focus === n.idx
-        if (!showAll && !isFocus && !ALWAYS_LABEL.has(n.type)) continue
+      for (const p of labelOrder) {
+        const isFocus = focus === p.idx
+        if (!showAll && !isFocus && !ALWAYS_LABEL.has(p.type)) continue
+        if (dim(p.idx) < 1 && !isFocus) continue
 
-        const w = ctx.measureText(n.label).width
-        const gap = n.r + 7
-        const flip = n.x + gap + w > W - 10
-        const x = flip ? n.x - gap - w : n.x + gap
-        const box = { x, y: n.y - 6, w, h: 12 }
-
-        const clash = placed.some(p =>
-          box.x < p.x + p.w && box.x + box.w > p.x &&
-          box.y < p.y + p.h && box.y + box.h > p.y
-        )
-        if (clash && !isFocus) continue
-        placed.push(box)
-
-        const c = NODE[n.type] || FALLBACK
-        ctx.save()
-        ctx.globalAlpha = dim(n.idx)
-        // knock the cream back out from under the text so edges don't cross it
-        ctx.fillStyle = '#f4ecdc'
-        ctx.fillRect(box.x - 2, box.y, w + 4, 12)
-        ctx.fillStyle = c.label
-        ctx.fillText(n.label, x, n.y)
-        ctx.restore()
+        const q = proj.get(p.idx)
+        const w = ctx.measureText(p.label).width
+        const gap = q.r + 8
+        const spots = [
+          [q.x + gap, q.y], [q.x - gap - w, q.y],
+          [q.x - w / 2, q.y - gap - 5], [q.x - w / 2, q.y + gap + 5],
+        ]
+        for (const [x, y] of spots) {
+          if (x < 4 || x + w > W - 4 || y < 9 || y > H - 9) continue
+          const box = { x: x - 3, y: y - 7, w: w + 6, h: 14 }
+          if (hits(box) && !isFocus) continue
+          taken.push(box)
+          ctx.save()
+          ctx.globalAlpha = dim(p.idx)
+          ctx.fillStyle = '#f4ecdc'
+          ctx.fillRect(box.x, box.y, box.w, box.h)
+          ctx.fillStyle = (NODE[p.type] || FALLBACK).label
+          ctx.fillText(p.label, x, y)
+          ctx.restore()
+          break
+        }
       }
     }
-    drawRef.current = draw
 
-    const frame = () => {
-      const energy = step()
-      draw()
+    // Physics parks; this does not. The forces are the expensive part — an
+    // O(n²) pass every frame — and once the layout settles there is nothing
+    // left for them to do. Drift and hover swell are a few multiplications
+    // per node, so the field keeps breathing without recomputing anything.
+    const breathe = (t) => {
+      const k = viewRef.current.k || 1
+      const hover = viewRef.current.hover
+      const held = viewRef.current.held
+      for (const p of stateRef.current.nodes) {
+        const base = (p.h || 0) * k
+        if (held === p.idx) { p.y = base; p.pop = 1; continue }
+        // a slow rise and fall, plus the faintest lateral sway
+        p.y = base + Math.sin(t * p.rate + p.phase) * 3.4 * k
+        p.drift = Math.cos(t * p.rate * 0.6 + p.phase) * 1.6 * k * p.sway
+        // hovering swells a node toward the pointer rather than snapping
+        const want = hover === p.idx ? 1 : 0
+        p.pop += (want - p.pop) * 0.18
+        if (Math.abs(p.pop - want) < 0.004) p.pop = want
+      }
+    }
+
+    const frame = (ts) => {
       const l = loopRef.current
-      l.still = energy < SLEEP_ENERGY ? l.still + 1 : 0
-      if (l.still >= SLEEP_FRAMES) { l.running = false; return }
+      // Scheduled first, and deliberately. If anything below throws, the loop
+      // still continues — otherwise a single bad frame stops the canvas for
+      // good, and wake() will not restart it because `running` is still true.
       l.raf = requestAnimationFrame(frame)
+
+      // A settled field only needs to breathe. Dropping it to ~20fps costs
+      // nothing visually and takes two thirds of the work off the machine,
+      // which matters for a panel that is often not the thing being looked at.
+      if (l.settled && !document.hidden) {
+        if (ts - (l.last || 0) < 48) return
+        l.last = ts
+      } else if (document.hidden) {
+        return                                  // background tab: draw nothing
+      }
+
+      const energy = step()
+      if (!reduced) breathe(performance.now() / 1000)
+
+      // record where each node has been, for the motion trail — only while
+      // something is actually moving
+      if (!l.settled) {
+        const proj = projRef.current
+        for (const p of stateRef.current.nodes) {
+          const q = proj.get(p.idx)
+          if (q) { p.trail.push({ x: q.x, y: q.y }); if (p.trail.length > 10) p.trail.shift() }
+        }
+      }
+      draw()
+
+      l.still = energy < SLEEP_ENERGY ? Math.min(l.still + 1, SLEEP_FRAMES) : 0
+      if (l.still >= SLEEP_FRAMES && !l.settled) {
+        l.settled = true
+        // once, on the transition — not every frame for the rest of the session
+        stateRef.current.nodes.forEach(p => { p.trail.length = 0 })
+        // under reduced motion this really does stop; otherwise it keeps
+        // drawing so the field stays alive, but does no physics
+        if (reduced) { cancelAnimationFrame(l.raf); l.running = false; draw() }
+      }
     }
 
     const wake = () => {
       const l = loopRef.current
       l.still = 0
+      l.settled = false
       if (l.running) return
       l.running = true
       l.raf = requestAnimationFrame(frame)
     }
     wakeRef.current = wake
 
-    const pick = (evt) => {
+    const at = (evt) => {
       const r = canvas.getBoundingClientRect()
-      const mx = evt.clientX - r.left, my = evt.clientY - r.top
-      const { nodes } = stateRef.current
+      return { x: evt.clientX - r.left, y: evt.clientY - r.top }
+    }
+    const isTouch = (evt) => evt.pointerType === 'touch' || evt.pointerType === 'pen'
+    const pick = (evt) => {
+      const { x, y } = at(evt)
       let best = -1, bd = Infinity
-      for (const n of nodes) {
-        const d = (n.x - mx) ** 2 + (n.y - my) ** 2
-        if (d < bd && d < (n.r + 16) ** 2) { bd = d; best = n.idx }
+      for (const [idx, q] of projRef.current) {
+        const d = (q.x - x) ** 2 + (q.y - y) ** 2
+        const rr = (q.r + 12) ** 2
+        if (d < rr && d < bd) { bd = d; best = idx }
       }
       return best
     }
 
-    // Repaint only — never wake the simulation, or the target moves.
     const onMove = (e) => {
+      const v = viewRef.current
+      const { x, y } = at(e)
+
+      // a finger that has not landed on a node should scroll the page, so the
+      // canvas only claims the gesture once something is actually being dragged
+      if (isTouch(e) && v.held === null) return
+
+      if (v.held !== null) {
+        // a few pixels of travel is a shaky finger, not a drag
+        if (v.downAt) {
+          const dx = x - v.downAt.x, dy = y - v.downAt.y
+          if (dx * dx + dy * dy > 16) v.moved = true
+        }
+        const node = stateRef.current.nodes.find(p => p.idx === v.held)
+        if (node) {
+          // the node's own height, not its drifting one — otherwise the plane
+          // being unprojected onto shifts every frame and the node lags
+          const base = (node.h || 0) * (v.k || 1)
+          const g = unproject(x, y, base)
+          node.x = g.x; node.z = g.z; node.vx = 0; node.vz = 0
+        }
+        wake()
+        return
+      }
+
+      // the pointer's horizontal position orbits the camera
+      const cam = camRef.current
+      const nextTarget = ((x / Math.max(1, v.W)) - 0.5) * 0.9
+      if (Math.abs(nextTarget - cam.target) > 0.001) { cam.target = nextTarget; wake() }
+
       const hit = pick(e)
-      if (hit === viewRef.current.hover) return
-      viewRef.current.hover = hit
-      canvas.style.cursor = hit >= 0 ? 'pointer' : 'default'
-      draw()
+      if (hit !== v.hover) {
+        v.hover = hit
+        canvas.style.cursor = hit >= 0 ? 'grab' : 'default'
+        if (!loopRef.current.running) draw()
+      }
     }
-    const onLeave = () => { viewRef.current.hover = -1; draw() }
-    const onClick = (e) => {
+
+    const onLeave = () => {
+      const v = viewRef.current
+      if (v.held !== null) return
+      v.hover = -1
+      camRef.current.target = 0
+      canvas.style.cursor = 'default'
+      wake()
+    }
+
+    const onDown = (e) => {
       const hit = pick(e)
-      viewRef.current.selected = hit === viewRef.current.selected ? -1 : hit
-      draw()
+      if (hit < 0) return
+      const v = viewRef.current
+      v.held = hit
+      v.hover = hit               // touch has no hover, so landing on one counts
+      // Selection is NOT set here. Pressing a node to drag it would otherwise
+      // also isolate it, dimming the rest of the field mid-drag. Whether this
+      // gesture was a click or a drag is only known on release.
+      v.downAt = at(e)
+      v.moved = false
+      canvas.style.cursor = 'grabbing'
+      // hold the gesture even if the finger leaves the canvas
+      try { canvas.setPointerCapture(e.pointerId) } catch { /* not captured, fine */ }
+      wake()
+      e.preventDefault()
+    }
+
+    // released on window, so letting go outside the canvas still lands
+    const onUp = (e) => {
+      const v = viewRef.current
+      if (v.held === null) return
+      const wasHeld = v.held
+      const dragged = v.moved
+      v.held = null
+      v.downAt = null
+      v.moved = false
+      // a press that did not travel is a click: toggle isolation on that node.
+      // a press that travelled was a drag, and leaves the selection alone.
+      if (!dragged) v.selected = wasHeld === v.selected ? -1 : wasHeld
+      if (e && isTouch(e)) v.hover = -1     // no lingering highlight after a tap
+      canvas.style.cursor = 'default'
+      wake()
+    }
+
+    // clicking empty space clears the isolation
+    const onClick = (e) => {
+      if (pick(e) >= 0) return              // handled on release
+      viewRef.current.selected = -1
+      if (!loopRef.current.running) draw()
     }
 
     const ro = new ResizeObserver(resize)
     ro.observe(host)
     resize()
-    canvas.addEventListener('mousemove', onMove)
-    canvas.addEventListener('mouseleave', onLeave)
+    // pointer events cover mouse, touch and pen with one path
+    canvas.addEventListener('pointermove', onMove)
+    canvas.addEventListener('pointerleave', onLeave)
+    canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('click', onClick)
+    canvas.addEventListener('pointercancel', onUp)
+    window.addEventListener('pointerup', onUp)
+    // the browser must not steal a drag as a scroll or a pinch
+    canvas.style.touchAction = 'none'
 
     return () => {
       cancelAnimationFrame(loopRef.current.raf)
       loopRef.current.running = false
       ro.disconnect()
-      canvas.removeEventListener('mousemove', onMove)
-      canvas.removeEventListener('mouseleave', onLeave)
+      canvas.removeEventListener('pointermove', onMove)
+      canvas.removeEventListener('pointerleave', onLeave)
+      canvas.removeEventListener('pointerdown', onDown)
       canvas.removeEventListener('click', onClick)
+      canvas.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('pointerup', onUp)
     }
   }, [])
 
   const legend = [
-    ['Episode', 'Episode'], ['Entity', 'Entity'], ['Contradiction', 'Contradiction'],
-    ['Concept', 'Concept'], ['Source', 'Source'],
+    ['Episode', TYPE_NAME.Episode], ['Entity', TYPE_NAME.Entity],
+    ['Contradiction', TYPE_NAME.Contradiction],
+    ['Concept', TYPE_NAME.Concept], ['Source', TYPE_NAME.Source],
   ]
 
   return (
@@ -1667,26 +2048,23 @@ function MemoryGraphPanel({ refreshTrigger }) {
       background: 'var(--bg)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '16px 22px 16px 34px', flex: 'none' }} className="eg-gtop">
-        <span className="eg-panel-title">Memory graph</span>
+        <span className="eg-panel-title">What it remembers</span>
         <span className="eg-mono" style={{ fontSize: 11.5, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: 'var(--n600)' }}>
-          {counts.nodes} nodes · {counts.edges} edges
+          {counts.nodes} things · {counts.edges} links
         </span>
       </div>
 
-      {/* 34px of left padding keeps the panel off the sidebar edge */}
       <div className="eg-gcanvas" style={{ flex: 1, minHeight: 0, padding: '0 22px 0 34px' }}>
         <div ref={hostRef} style={{ position: 'relative', width: '100%', height: '100%',
           overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none',
-            backgroundImage:
-              'linear-gradient(to right, var(--grid) 1px, transparent 1px),' +
-              'linear-gradient(to bottom, var(--grid) 1px, transparent 1px)',
-            backgroundSize: '58px 58px',
-            WebkitMaskImage: 'radial-gradient(ellipse 78% 78% at 50% 50%, #000 55%, transparent 100%)',
-            maskImage: 'radial-gradient(ellipse 78% 78% at 50% 50%, #000 55%, transparent 100%)' }} />
           <Brackets />
           <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, display: 'block' }} />
+          {counts.nodes > 0 && (
+            <span className="eg-graph-hint">
+              {coarse ? 'drag a node to pull it' : 'move to orbit · drag a node to pull it'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -1696,11 +2074,11 @@ function MemoryGraphPanel({ refreshTrigger }) {
           <span className="eg-label" style={{ color: 'var(--ink)' }}>How to read</span>
           <span style={{ fontFamily: 'var(--sans)', fontSize: 11.5, fontWeight: 600,
             letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--n600)' }}>
-            Area = strength · red = contradiction · click a node to isolate it
+            Bigger = more certain · red = a conflict, and it floats above the rest
           </span>
           <button className="eg-link" style={{ marginLeft: 'auto' }}
             onClick={() => setShowEpisodes(v => !v)} aria-pressed={showEpisodes}>
-            {showEpisodes ? 'Hide turns' : 'Show turns'}
+            {showEpisodes ? 'Hide what you said' : 'Show what you said'}
           </button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))',
@@ -1854,7 +2232,7 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
           letterSpacing: '-0.01em' }}>
           {(score * 100).toFixed(0)}%
         </span>
-        <span className="eg-label">Grounded</span>
+        <span className="eg-label">From memory</span>
         <span className="eg-seg" aria-hidden="true">
           {Array.from({ length: SEGMENTS }, (_, i) => (
             <i key={i} style={i < filled ? { background: tone } : undefined} />
@@ -1864,14 +2242,14 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
         {total > 0 && (
           <button className="eg-link" style={{ marginLeft: 'auto' }}
             onClick={() => setOpen(!open)} aria-expanded={open}>
-            {open ? 'Hide evidence' : 'Evidence'}
+            {open ? 'Hide the working' : 'Show the working'}
           </button>
         )}
       </div>
 
       {open && total > 0 && (
         <div style={{ marginTop: 14 }}>
-          <div className="eg-label" style={{ marginBottom: 6 }}>Claims checked</div>
+          <div className="eg-label" style={{ marginBottom: 6 }}>What it checked</div>
           {cited.map((c, i) => (
             <div key={`c${i}`} className="eg-claim">
               <span className="eg-tick" />
@@ -1891,7 +2269,7 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
 
           {mems.length > 0 ? (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--n300)' }}>
-              <div className="eg-label" style={{ marginBottom: 6 }}>Memories used</div>
+              <div className="eg-label" style={{ marginBottom: 6 }}>What it used</div>
               {mems.map((m, i) => (
                 <div key={i} className="eg-memrow">
                   <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0,
@@ -1918,14 +2296,14 @@ function GroundingBlock({ grounding, memories, contradictions, onFeedback }) {
             </div>
           ) : (
             <div className="eg-label" style={{ marginTop: 14, color: 'var(--accent-700)' }}>
-              No memory retrieved
+              Nothing stored matched this
             </div>
           )}
 
           {contradictions?.length > 0 && (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid var(--accent)` }}>
               <div className="eg-label" style={{ color: 'var(--accent-700)', marginBottom: 6 }}>
-                Conflicts held
+                Both versions kept
               </div>
               {contradictions.map((c, i) => (
                 <div key={i} style={{ fontSize: 13, color: 'var(--ink-dim)', padding: '3px 0' }}>
@@ -1955,10 +2333,11 @@ function Transcript({ messages, stageLabel, input, setInput, send, loading, onFe
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '16px 30px', flex: 'none', borderBottom: '1px solid var(--n300)' }}
         className="eg-ttop">
-        <span className="eg-panel-title">Transcript</span>
+        <span className="eg-panel-title">Conversation</span>
         <span className="eg-mono" style={{ fontSize: 11.5, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: 'var(--n600)' }}>
-          {turns} turns{meanScore != null && ` · mean grounding ${(meanScore * 100).toFixed(0)}%`}
+          {turns} {turns === 1 ? 'message' : 'messages'}
+          {meanScore != null && ` · ${(meanScore * 100).toFixed(0)}% from memory on average`}
         </span>
       </div>
 
@@ -2087,10 +2466,10 @@ function TraceScreen({ refreshTrigger }) {
       {loading && <div className="eg-label">Loading</div>}
       {!loading && traces.length === 0 && (
         <div style={{ maxWidth: 420 }}>
-          <div className="eg-label" style={{ marginBottom: 10 }}>No traces</div>
+          <div className="eg-label" style={{ marginBottom: 10 }}>Nothing here yet</div>
           <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
-            Every turn writes a trace of which agents ran and how long each took.
-            Send a message to make one.
+            Every answer records what it did to produce it — what it looked up,
+            what it checked, how long each part took. Send a message to see one.
           </p>
         </div>
       )}
@@ -2113,7 +2492,7 @@ function TraceScreen({ refreshTrigger }) {
               <span style={{ width: 110 }}>
                 {(t.total_tokens_input + t.total_tokens_output).toLocaleString()} tok
               </span>
-              <span style={{ width: 90 }}>{t.agent_count} agents</span>
+              <span style={{ width: 90 }}>{t.agent_count} steps</span>
               {t.error_count > 0 && (
                 <span style={{ color: 'var(--accent-700)' }}>{t.error_count} errors</span>
               )}
@@ -2238,7 +2617,7 @@ function DocumentsScreen({ onIngest }) {
 
   return (
     <div style={{ overflowY: 'auto', padding: '26px 34px 40px' }}>
-      <div className="eg-label" style={{ marginBottom: 8 }}>Ingest a source</div>
+      <div className="eg-label" style={{ marginBottom: 8 }}>Add a document</div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
         <input
@@ -2246,12 +2625,12 @@ function DocumentsScreen({ onIngest }) {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && ingestUrl()}
-          placeholder="https://…"
+          placeholder="Paste a link to a page"
           disabled={!!busy}
         />
         <button className="eg-send" style={{ padding: '0 30px', flex: 'none' }}
           onClick={ingestUrl} disabled={!!busy}>
-          {busy === 'url' ? 'Reading' : 'Ingest'}
+          {busy === 'url' ? 'Reading' : 'Add'}
         </button>
         <button className="eg-send" style={{ padding: '0 30px', flex: 'none',
           background: 'transparent', color: 'var(--ink)' }}
@@ -2269,7 +2648,7 @@ function DocumentsScreen({ onIngest }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 14 }}>
         <span className="eg-panel-title">Documents</span>
         <span className="eg-label">
-          {docs.length} sources · {totalChunks} nodes written
+          {docs.length} {docs.length === 1 ? 'document' : 'documents'} · {totalChunks} pieces stored
           {totalPages > 0 && ` · ${totalPages} pages`}
         </span>
       </div>
@@ -2279,8 +2658,8 @@ function DocumentsScreen({ onIngest }) {
       {!loading && docs.length === 0 && (
         <p style={{ margin: 0, maxWidth: 460, fontSize: 16, lineHeight: 1.6,
           color: 'var(--ink-dim)' }}>
-          Nothing ingested yet. Add a URL or a PDF and its text becomes
-          retrievable alongside everything you've said.
+          Nothing added yet. Paste a link or upload a PDF and it can answer
+          from that too, alongside everything you have told it.
         </p>
       )}
 
@@ -2299,7 +2678,7 @@ function DocumentsScreen({ onIngest }) {
             <tr>
               {[
                 ['Source', 'left'], ['Kind', 'left'], ['Pages', 'right'],
-                ['Nodes written', 'right'], ['Added', 'left'], ['', 'right'],
+                ['Pieces stored', 'right'], ['Added', 'left'], ['', 'right'],
               ].map(([h, align], i) => (
                 <th key={i} className="eg-label" style={{ textAlign: align,
                   padding: '0 14px 10px 0', borderBottom: '1px solid var(--n400)',
@@ -2447,13 +2826,22 @@ function SessionsScreen({ refreshTrigger }) {
    ────────────────────────────────────────────────────────────── */
 function AppInner({ email, onLogout }) {
   const [view, setView] = useState('chat')
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(() => loadTranscript(email))
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [graphRefresh, setGraphRefresh] = useState(0)
   const sessionId = useMemo(
     () => '0x' + Math.random().toString(16).slice(2, 6).toUpperCase(), []
   )
+
+  // Written once a reply finishes, never mid-stream. Saving on every messages
+  // change would serialise the whole transcript on every streamed token, which
+  // blocks the main thread and makes the reply appear to stall.
+  const streaming = messages.some(m => m.streaming)
+  useEffect(() => {
+    if (streaming) return
+    saveTranscript(email, messages)
+  }, [email, streaming, messages.length])
   const narrow = useNarrow()
   const [menuOpen, setMenuOpen] = useState(false)
   const [pane, setPane] = useState('transcript')   // which pane shows on a phone
@@ -2548,7 +2936,11 @@ function AppInner({ email, onLogout }) {
     }
   }
 
-  const resetSession = () => { setMessages([]); setGraphRefresh(p => p + 1) }
+  const resetSession = () => {
+    setMessages([])
+    saveTranscript(email, [])
+    setGraphRefresh(p => p + 1)
+  }
 
   const lastMsg = messages[messages.length - 1]
   const stageLabel = loading && lastMsg?.role === 'assistant' && lastMsg?.content === ''
@@ -2691,6 +3083,7 @@ function App() {
   const logout = () => {
     localStorage.removeItem('engram_token')
     localStorage.removeItem('engram_email')
+    try { sessionStorage.removeItem(TRANSCRIPT_KEY(email)) } catch { /* nothing to clear */ }
     setAuthed(false)
     setEmail('')
   }
