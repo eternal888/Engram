@@ -8,7 +8,6 @@ you tell it as a knowledge graph, retrieves from it, checks every claim in a rep
 what it holds, and flags contradictions rather than silently overwriting them.
 
 **Live:** https://engram-gold.vercel.app
-**API:** https://engram-production-d8b8.up.railway.app
 
 ---
 
