@@ -33,7 +33,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.graph.graph_client import graph_client
@@ -84,15 +84,70 @@ def wipe_eval_user():
     return deleted
 
 
+def setup_text(msg) -> str:
+    """A setup entry is either a plain string or {"text": ..., "age_days": N}."""
+    return msg if isinstance(msg, str) else msg["text"]
+
+
+def _seal_existing():
+    """
+    Mark every current node as already aged.
+
+    Without this, backdating a later message would also reach back and move
+    the timestamps of earlier ones, and every memory in the case would end up
+    the same age again — which is the problem this whole mechanism exists to
+    solve.
+    """
+    graph_client.run(
+        "MATCH (n {user_id: $uid}) SET n._aged = true",
+        {"uid": EVAL_USER_ID},
+    )
+
+
+def _backdate(age_days: float) -> int:
+    """
+    Push the timestamps of the most recent turn's nodes into the past.
+
+    The harness seeds and probes within a few seconds, so every memory is the
+    same age and the recency term in the ranker contributes a constant. Nothing
+    that depends on age — ranking weight, decay, promotion, the contradiction
+    agent's recency channel — can be observed under those conditions. Rewriting
+    created_at is the cheapest way to make age real without waiting weeks.
+    """
+    stamp = (datetime.now(timezone.utc) - timedelta(days=age_days)).isoformat()
+    rows = graph_client.run("""
+        MATCH (n {user_id: $uid})
+        WHERE n.created_at IS NOT NULL AND coalesce(n._aged, false) = false
+        SET n.created_at = $stamp,
+            n.last_accessed = $stamp,
+            n._aged = true
+        RETURN count(n) AS n
+        """, {"uid": EVAL_USER_ID, "stamp": stamp})
+    return rows[0]["n"] if rows else 0
+
+
 def seed(messages: list):
-    """Send setup messages through the real pipeline, synchronously."""
+    """
+    Send setup messages through the real pipeline, synchronously.
+
+    An entry may carry an age: {"text": "...", "age_days": 60}. Its memories
+    are written normally and then backdated, so a case can ask whether a fact
+    from yesterday outranks an equally relevant one from two months ago.
+    """
     for msg in messages:
-        result = chat(msg, user_id=EVAL_USER_ID)
+        result = chat(setup_text(msg), user_id=EVAL_USER_ID)
         # chat() defers memory writing to the route; run it inline here so the
         # memory exists before the next step queries it.
         process_memory_background(
             result["_safe_message"], EVAL_USER_ID, result["trace_id"]
         )
+        age = msg.get("age_days") if isinstance(msg, dict) else None
+        if age:
+            moved = _backdate(float(age))
+            print(f"  aged {moved} nodes back {age} days")
+        # seal whether or not this turn was aged, so the next backdate cannot
+        # reach past it
+        _seal_existing()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -188,6 +243,24 @@ def run_retrieval(cases: list) -> dict:
         memories = out["memories_used"]
         needle = case["expect_memory_containing"].lower()
 
+        # If every retrieved memory is the same age, the recency term is a
+        # constant and 20% of the ranking weight is doing nothing. Recording
+        # the spread makes that visible instead of leaving it to be inferred.
+        ages = []
+        for m in memories:
+            ts = m.get("created_at")
+            if not ts:
+                continue
+            try:
+                t = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
+                dt = datetime.fromisoformat(t)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                ages.append((datetime.now(timezone.utc) - dt).total_seconds() / 86400.0)
+            except (ValueError, TypeError):
+                pass
+        age_spread = round(max(ages) - min(ages), 3) if len(ages) > 1 else 0.0
+
         # Rank of the first memory containing the expected substring (1-based)
         rank = None
         for i, m in enumerate(memories, 1):
@@ -207,6 +280,7 @@ def run_retrieval(cases: list) -> dict:
             "hit_at_3": rank is not None and rank <= 3,
             "hit_at_5": rank is not None and rank <= 5,
             "reciprocal_rank": (1.0 / rank) if rank else 0.0,
+            "age_spread_days": age_spread,
             "answer_ok": answer_ok,
             "latency_ms": latency_ms,
             "passed": (rank is not None and rank <= 5) and answer_ok,
@@ -331,7 +405,7 @@ def run_contradiction(cases: list) -> dict:
 
         results.append({
             "id": case["id"],
-            "setup": case["setup"][0],
+            "setup": setup_text(case["setup"][0]),
             "followup": case["followup"],
             "detected": detected,
             "expected": expected,

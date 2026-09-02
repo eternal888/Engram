@@ -2,7 +2,7 @@ import json
 import os
 import re
 import spacy
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.core.llm_client import client
 from backend.graph.graph_client import graph_client
@@ -40,16 +40,47 @@ LEADING_WORDS = {"a", "an", "the", "my", "your", "our", "their", "his",
 MIN_RELEVANCE = float(os.getenv("RETRIEVAL_MIN_RELEVANCE", "0.6"))
 
 
+RECENCY_HALF_LIFE_DAYS = 14.0
+
+
 def recency_score(created_at: str) -> float:
-    """1.0 = brand new, fades to 0 over ~30 days."""
+    """
+    1.0 = brand new, decaying with a half-life of two weeks.
+
+    This used to compare an aware datetime against a naive utcnow(), which
+    raises TypeError. The bare `except` swallowed it and returned 0.5 for
+    every memory ever scored, so the recency term contributed a constant and
+    the ranker was effectively relevance and trust only.
+
+    Both sides are now explicitly UTC-aware, and only the parse is guarded —
+    a genuinely unparseable timestamp still falls back, but a comparison bug
+    will surface instead of hiding.
+    """
     if not created_at:
         return 0.5
+
     try:
-        created = datetime.fromisoformat(created_at.replace("Z", ""))
-        age_days = (datetime.utcnow() - created).total_seconds() / 86400
-        return max(0.0, min(1.0, 1.0 - age_days / 30))
-    except Exception:
+        text = created_at.strip()
+        # Neo4j hands back either a naive local-looking string or an offset
+        # one; normalise the Z suffix that fromisoformat rejects before 3.11
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        created = datetime.fromisoformat(text)
+    except (ValueError, TypeError):
         return 0.5
+
+    # a timestamp written without an offset is UTC — that is what the writers use
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+
+    age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400.0
+    if age_days < 0:
+        return 1.0                      # clock skew: treat as brand new
+
+    # Exponential rather than linear. A linear fade to zero at 30 days makes a
+    # 29-day-old memory and a 31-day-old one differ enormously while a 1-day
+    # and 2-day-old pair differ barely at all; decay should be the other way round.
+    return float(0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS))
 
 
 def _strip_leading(term: str) -> str:
