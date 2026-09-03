@@ -30,8 +30,7 @@ PII_PLACEHOLDERS = {
 # TraceEvent and User nodes, which blows up the pattern match.
 MEMORY_LABELS = ["Episode", "Concept", "Entity", "Source", "Contradiction"]
 
-# Determiners and possessives spaCy leaves on noun chunks. "my sleep" will
-# never CONTAINS-match an Entity named "sleep".
+# Determiners and possessives spaCy leaves on noun chunks.
 LEADING_WORDS = {"a", "an", "the", "my", "your", "our", "their", "his",
                  "her", "its", "this", "that", "these", "those", "some", "any"}
 
@@ -39,6 +38,21 @@ LEADING_WORDS = {"a", "an", "the", "my", "your", "our", "their", "his",
 # was pulling engram memories at 0.55 and the model ran with them.
 MIN_RELEVANCE = float(os.getenv("RETRIEVAL_MIN_RELEVANCE", "0.6"))
 
+# Anchor selection is an INDEX problem, not a graph problem (Rodriguez &
+# Neubauer). Anchors are found by embedding proximity, then traversal walks
+# from them. String containment could not do this: 'pet' never CONTAINS-
+# matched an entity named 'Max', so traversal fired on 2 of 10 eval cases.
+ANCHOR_MIN_SIMILARITY = float(os.getenv("RETRIEVAL_ANCHOR_MIN", "0.55"))
+MAX_ANCHOR_TERMS = 3          # one embedding call each — keep the bill small
+ANCHORS_PER_TERM = 2
+
+# Graph hits used to be scored at a flat 0.7, which sat above most real
+# cosine scores and pushed up to 20 tied results over genuinely relevant
+# vector hits. Score is now derived from how the node was actually reached.
+GRAPH_BASE = 0.45
+GRAPH_HOP_PENALTY = 0.10      # a 2-hop node is weaker than a 1-hop node
+GRAPH_PATH_BONUS = 0.06       # reached by many paths => more related
+GRAPH_MAX = 0.90
 
 RECENCY_HALF_LIFE_DAYS = 14.0
 
@@ -52,24 +66,19 @@ def recency_score(created_at: str) -> float:
     every memory ever scored, so the recency term contributed a constant and
     the ranker was effectively relevance and trust only.
 
-    Both sides are now explicitly UTC-aware, and only the parse is guarded —
-    a genuinely unparseable timestamp still falls back, but a comparison bug
-    will surface instead of hiding.
+    Both sides are now explicitly UTC-aware, and only the parse is guarded.
     """
     if not created_at:
         return 0.5
 
     try:
         text = created_at.strip()
-        # Neo4j hands back either a naive local-looking string or an offset
-        # one; normalise the Z suffix that fromisoformat rejects before 3.11
         if text.endswith("Z"):
             text = text[:-1] + "+00:00"
         created = datetime.fromisoformat(text)
     except (ValueError, TypeError):
         return 0.5
 
-    # a timestamp written without an offset is UTC — that is what the writers use
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
 
@@ -77,9 +86,6 @@ def recency_score(created_at: str) -> float:
     if age_days < 0:
         return 1.0                      # clock skew: treat as brand new
 
-    # Exponential rather than linear. A linear fade to zero at 30 days makes a
-    # 29-day-old memory and a 31-day-old one differ enormously while a 1-day
-    # and 2-day-old pair differ barely at all; decay should be the other way round.
     return float(0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS))
 
 
@@ -99,8 +105,7 @@ def vector_search(query: str, user_id: str, top_k: int = 8) -> list:
     Semantic search via Neo4j's HNSW vector index using the SEARCH clause.
 
     user_id is stored in the index as an additional property, so filtering
-    happens inside the index traversal — no over-fetching, and it scales
-    correctly as more users are added.
+    happens inside the index traversal — no over-fetching.
     """
     query_embedding = embed_text(query)
 
@@ -142,10 +147,7 @@ def vector_search(query: str, user_id: str, top_k: int = 8) -> list:
 # 2. GRAPH TRAVERSAL — walk relationships from query entities
 # ──────────────────────────────────────────────────────────────
 def _extract_entities_with_claude(query: str) -> list:
-    """
-    Fallback path. Slower (~2.5s) but handles vague or implicit references
-    like "that place I mentioned down south".
-    """
+    """Fallback path. Slower (~2.5s) but handles vague or implicit references."""
     print("🐢 spaCy found nothing — falling back to Claude for entity extraction")
     prompt = f"""Extract entity names from this query (people, places, things, concepts).
 The query may be vague or reference something implicitly — infer what it likely refers to.
@@ -161,9 +163,6 @@ Query: {query}"""
             messages=[{"role": "user", "content": prompt}]
         )
         raw = response.content[0].text.strip()
-
-        # Claude sometimes appends prose after the JSON — extract just the
-        # first {...} block rather than parsing the whole response.
         match = re.search(r'\{.*?\}', raw, re.DOTALL)
         if not match:
             print("⚠️ No JSON object found in Claude response")
@@ -180,16 +179,12 @@ Query: {query}"""
 def extract_query_entities(query: str) -> list:
     """
     Two-tier entity extraction:
-      1. spaCy NER + noun chunks (local, ~5ms) — handles explicit entities
-      2. Claude fallback (~2.5s) — only when spaCy finds nothing,
-         catches vague references like "that thing we discussed"
-
-    PII placeholders are stripped from both paths.
+      1. spaCy NER + noun chunks (local, ~5ms)
+      2. Claude fallback (~2.5s) — only when spaCy finds nothing
     """
     if _nlp is not None:
         doc = _nlp(query)
 
-        # Named entities — proper nouns like "Hyderabad", "Google"
         useful_labels = {"PERSON", "ORG", "GPE", "LOC", "PRODUCT",
                          "EVENT", "WORK_OF_ART", "FAC", "NORP"}
         entities = [
@@ -198,8 +193,6 @@ def extract_query_entities(query: str) -> list:
             if ent.label_ in useful_labels and ent.text.strip()
         ]
 
-        # Noun chunks — catches common nouns like "chess", "data scientist"
-        # that NER misses but which are Entity nodes in the graph
         stopword_roots = {"it", "this", "that", "thing", "something",
                           "anything", "everything", "i", "you", "we", "they"}
         noun_chunks = [
@@ -212,67 +205,147 @@ def extract_query_entities(query: str) -> list:
 
         combined = [_strip_leading(e) for e in entities + noun_chunks]
         combined = [e for e in combined if len(e) > 2]
-        combined = list(dict.fromkeys(combined))  # dedupe, preserve order
-
-        # Drop redaction placeholders — "[PERSON]" is not a thing to search for
+        combined = list(dict.fromkeys(combined))
         combined = [e for e in combined if e.strip("[]").lower() not in PII_PLACEHOLDERS]
 
         if combined:
             print(f"⚡ spaCy entities: {combined}")
             return combined[:5]
 
-    # Nothing usable found locally — escalate to Claude
     return [_strip_leading(e) for e in _extract_entities_with_claude(query)]
 
 
+def find_anchors(terms: list, user_id: str) -> list:
+    """
+    Resolve query terms to real graph nodes by meaning rather than spelling.
+
+    'pet' has no lexical overlap with 'Max', and 'PRIYAS' has none with
+    'PRIYA', but both sit close in embedding space. Every Entity carries an
+    embedding and the :Memory label, so the existing HNSW index does this
+    without new infrastructure.
+
+    Returns [{id, name, similarity, term}], best first, deduped by node id.
+    """
+    anchors = {}
+
+    for term in terms[:MAX_ANCHOR_TERMS]:
+        if not term.strip():
+            continue
+        try:
+            term_embedding = embed_text(term)
+        except Exception as e:
+            print(f"⚠️ anchor embedding failed for {term!r}: {e}")
+            continue
+
+        rows = graph_client.run("""
+            MATCH (node)
+              SEARCH node IN (
+                VECTOR INDEX memory_embeddings
+                FOR $embedding
+                WHERE node.user_id = $user_id
+                LIMIT $limit
+              ) SCORE AS score
+            WHERE 'Entity' IN labels(node)
+            RETURN node.id as id,
+                   coalesce(node.name, '') as name,
+                   score
+            ORDER BY score DESC
+            """, {
+            "embedding": term_embedding,
+            "user_id": user_id,
+            "limit": ANCHORS_PER_TERM * 4,   # over-fetch, then keep Entities
+        })
+
+        for r in rows[:ANCHORS_PER_TERM]:
+            if r["score"] < ANCHOR_MIN_SIMILARITY:
+                continue
+            existing = anchors.get(r["id"])
+            if existing and existing["similarity"] >= r["score"]:
+                continue
+            anchors[r["id"]] = {
+                "id": r["id"],
+                "name": r["name"],
+                "similarity": round(r["score"], 4),
+                "term": term,
+            }
+
+    return sorted(anchors.values(), key=lambda a: a["similarity"], reverse=True)
+
+
 def graph_traversal(query: str, user_id: str, depth: int = 2) -> list:
-    """Find entities mentioned in query, walk graph 2 hops out, return connected memories."""
-    entities = extract_query_entities(query)
-    if not entities:
+    """Resolve query terms to anchor nodes, walk 2 hops out, return what's connected."""
+    terms = extract_query_entities(query)
+    if not terms:
         return []
 
-    print(f"🔍 Graph traversal anchored on entities: {entities}")
+    anchors = find_anchors(terms, user_id)
+    if not anchors:
+        print(f"🔍 no anchors above {ANCHOR_MIN_SIMILARITY} for terms: {terms}")
+        return []
 
-    # Anchors are bounded before expanding, and every node on the path must
-    # be a memory node. Without both, this expands through TraceEvent nodes
-    # and Aura raises an internal CypherExecution error.
+    print("🔍 anchors: " + ", ".join(
+        f"{a['term']!r}→{a['name']!r} {a['similarity']}" for a in anchors))
+
+    anchor_ids = [a["id"] for a in anchors]
+    anchor_sim = {a["id"]: a["similarity"] for a in anchors}
+
+    # path_count and min_hops replace the old flat 0.7. A node reached by
+    # several distinct paths is more related than one reached by a single
+    # 2-hop walk — the collaborative-filtering weighting from the traversal
+    # paper, applied to ranking rather than recommendation.
     results = graph_client.run("""
         MATCH (anchor)
-        WHERE anchor.user_id = $user_id
-          AND any(l IN labels(anchor) WHERE l IN $types)
-          AND any(name IN $entities WHERE
-              toLower(coalesce(anchor.name, anchor.content, anchor.summary, ''))
-              CONTAINS toLower(name))
-        WITH anchor LIMIT 10
+        WHERE anchor.id IN $anchor_ids
 
         MATCH path = (anchor)-[*1..2]-(connected)
         WHERE connected.user_id = $user_id
           AND connected.id IS NOT NULL
-          AND connected.id <> anchor.id
+          AND NOT connected.id IN $anchor_ids
           AND all(n IN nodes(path)
                   WHERE any(l IN labels(n) WHERE l IN $types))
-        RETURN DISTINCT
-               labels(connected)[0] as type,
+        WITH connected, anchor, min(length(path)) as hops, count(path) as paths
+        RETURN labels(connected)[0] as type,
                connected.id as id,
                coalesce(connected.summary, connected.content, connected.name, '') as text,
                connected.confidence as confidence,
                coalesce(connected.confirmation_count, 0) as confirmations,
                connected.created_at as created_at,
-               anchor.id as anchor_id
+               anchor.id as anchor_id,
+               hops,
+               paths
+        ORDER BY paths DESC, hops ASC
         LIMIT 20
-        """, {"user_id": user_id, "entities": entities, "types": MEMORY_LABELS})
+        """, {
+        "user_id": user_id,
+        "anchor_ids": anchor_ids,
+        "types": MEMORY_LABELS,
+    })
 
-    return [{
-        "type": r["type"],
-        "id": r["id"],
-        "text": r["text"],
-        "similarity": 0.7,  # baseline — graph hits are structurally relevant
-        "confidence": r["confidence"] or 0.5,
-        "confirmations": r["confirmations"],
-        "created_at": r["created_at"],
-        "anchor_id": r["anchor_id"],
-        "source": "graph",
-    } for r in results]
+    hits = []
+    for r in results:
+        # Start from how good the anchor match was, then adjust for how the
+        # node was reached. Never allowed to reach 1.0 — a structural hit is
+        # evidence of relatedness, not evidence of being the answer.
+        base = GRAPH_BASE + 0.3 * anchor_sim.get(r["anchor_id"], 0.6)
+        base -= GRAPH_HOP_PENALTY * (r["hops"] - 1)
+        base += GRAPH_PATH_BONUS * min(r["paths"] - 1, 4)
+        similarity = round(max(0.30, min(GRAPH_MAX, base)), 4)
+
+        hits.append({
+            "type": r["type"],
+            "id": r["id"],
+            "text": r["text"],
+            "similarity": similarity,
+            "confidence": r["confidence"] or 0.5,
+            "confirmations": r["confirmations"],
+            "created_at": r["created_at"],
+            "anchor_id": r["anchor_id"],
+            "hops": r["hops"],
+            "paths": r["paths"],
+            "source": "graph",
+        })
+
+    return hits
 
 
 # ──────────────────────────────────────────────────────────────
